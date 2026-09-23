@@ -1,42 +1,38 @@
 # Development
 
-## Local setup
+## Setup
 
-Install Bun 1.4.2 or newer and the OpenCode v2 CLI. The integration tests start
-`opencode serve`, so `opencode` must be on `PATH`. CI uses `@opencode/cli@2.0.12`.
-
-From the repository root:
+Install Bun 1.4.2 or newer and put the OpenCode v2 CLI on `PATH`.
 
 ```sh
 bun ci
+```
+
+## Tests
+
+`make test` runs the typecheck, unit tests, and integration tests. The integration
+tests call SystemOne and need `OPENCODE_API_KEY` in your environment. To run
+checks without an API key:
+
+```sh
 bun run check
 bun run test
 ```
 
-The integration tests start isolated OpenCode servers and call the real
-SystemOne API. Set `OPENCODE_API_KEY` in your environment, then run:
+## GitHub Actions
 
-```sh
-bun run test:e2e
-```
+Add `OPENCODE_API_KEY` as a repository secret under **Settings > Secrets and
+variables > Actions**. The [test workflow](../.github/workflows/test.yml) runs
+the typecheck and unit tests on pull requests, and all tests on pushes to this
+repository's `main` branch.
 
-`make test` runs the typecheck, unit tests, and integration tests together.
-`make upgrade-dependencies` updates exact versions in `package.json` and
-`bun.lock`. Run `make test` after an upgrade.
+## Dependencies
 
-## GitHub Actions setup
-
-In the `alexandru/opencode-shell-safety` repository, add `OPENCODE_API_KEY`
-under **Settings > Secrets and variables > Actions**. The workflows use it for
-real SystemOne integration tests.
-
-The [test workflow](../.github/workflows/test.yml) runs the typecheck and unit
-tests on pull requests. Pushes to `main` also run integration tests. Pull
-requests do not receive the secret.
+`make upgrade-dependencies` updates `package.json` to the latest exact versions,
+including major upgrades, and refreshes `bun.lock`. Run `make test` afterward.
 
 ## Publishing
 
-To release, change the version in `package.json` and authenticate locally with
-npm. Run `make publish` from the repository root. It runs the full test suite,
-checks the package contents with `bun pm pack --dry-run`, then runs
-`npm publish --access public`. npm rejects an already published version.
+Change the version in `package.json`, authenticate with npm, and run
+`make publish`. It runs the tests, previews the package with
+`bun pm pack --dry-run`, then publishes to npm.
