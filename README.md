@@ -85,46 +85,4 @@ Set at least one of `integration` or `apiKeyEnv`.
 The plugin sends the selected credential to `endpoint`. Check the URL when
 configuring a custom endpoint.
 
-## Development
-
-Install dependencies:
-
-```sh
-bun install
-```
-
-Run the typecheck and unit tests:
-
-```sh
-bun run check
-bun run test
-```
-
-The E2E suite starts private OpenCode servers with isolated configuration,
-state, cache, data, and database directories. It makes real SystemOne requests
-and requires `OPENCODE_API_KEY` in the environment:
-
-```sh
-bun run test:e2e
-```
-
-Run every check with:
-
-```sh
-make test
-```
-
-## Release
-
-Before publishing, run the full test target and inspect the package contents:
-
-```sh
-make test
-bun pm pack --dry-run
-```
-
-Publish from a clean worktree after reviewing the version and package contents:
-
-```sh
-bun publish --access public
-```
+See [development.md](docs/development.md) for local tests and publishing.
