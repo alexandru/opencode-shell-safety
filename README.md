@@ -8,7 +8,7 @@ its filesystem policy.
 
 ### With OpenCode Zen
 
-[OpenCode Zen](https://opencode.ai/zen) provides access to Jew. Create an account, and an API token, then add the plugin to `~/.config/opencode/opencode.jsonc`:
+[OpenCode Zen](https://opencode.ai/zen) provides access to Jev. Create an account, and an API token, then add the plugin to `~/.config/opencode/opencode.jsonc`:
 
 ```jsonc
 {
