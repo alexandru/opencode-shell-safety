@@ -34,33 +34,44 @@ const ThresholdsSchema = Schema.Struct({
 })
 
 const HttpPolicySchema = Schema.Struct({
-  methods: Schema.Array(Schema.String),
-  credentials: Schema.Record(Schema.String, Schema.Array(Schema.String)),
+  methods: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  credentials: Schema.Record(Schema.String, Schema.Array(Schema.String))
+    .pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
 })
 
 const AgentPolicySchema = Schema.Struct({
   enabled: Schema.Boolean,
   thresholds: Schema.optionalKey(ThresholdsSchema),
-  http: HttpPolicySchema,
+  http: HttpPolicySchema.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ methods: [], credentials: {} }))),
 })
 
 const CacheOptionsSchema = Schema.Struct({
-  capacity: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10_000 })),
-  ttlMs: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 86_400_000 })),
+  capacity: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10_000 }))
+    .pipe(Schema.withDecodingDefaultKey(Effect.succeed(256))),
+  ttlMs: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 86_400_000 }))
+    .pipe(Schema.withDecodingDefaultKey(Effect.succeed(300_000))),
 })
 
 export const OptionsSchema = Schema.Struct({
   endpoint: Schema.String,
   model: Schema.String,
-  integration: Schema.String,
-  allowProbability: Probability,
-  violationProbability: Probability,
-  timeoutMs: Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 60_000 })),
-  maxAttempts: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 })),
-  retryDelayMs: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 })),
-  cache: CacheOptionsSchema,
+  integration: Schema.optionalKey(Schema.String),
+  apiKeyEnv: Schema.optionalKey(Schema.String),
+  allowProbability: Probability.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0.45))),
+  violationProbability: Probability.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0.4))),
+  timeoutMs: Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 60_000 }))
+    .pipe(Schema.withDecodingDefaultKey(Effect.succeed(15_000))),
+  maxAttempts: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 }))
+    .pipe(Schema.withDecodingDefaultKey(Effect.succeed(2))),
+  retryDelayMs: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 }))
+    .pipe(Schema.withDecodingDefaultKey(Effect.succeed(250))),
+  cache: CacheOptionsSchema.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
   agents: Schema.Record(Schema.String, AgentPolicySchema),
-})
+}).check(Schema.makeFilter((options) =>
+  options.integration || options.apiKeyEnv
+    ? undefined
+    : { path: ["apiKeyEnv"], issue: "integration or apiKeyEnv is required" }
+))
 
 export type Options = typeof OptionsSchema.Type
 export type AgentPolicy = typeof AgentPolicySchema.Type
@@ -294,6 +305,7 @@ const requestAssessment = (
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
           },
+          redirect: "error",
           body: requestBody,
           signal,
         }),
@@ -332,8 +344,8 @@ const isRetryable = (error: JevRequestError): boolean => {
   }
 }
 
-const environmentApiKey = Effect.gen(function* () {
-  const apiKey = yield* Config.redacted("OPENCODE_API_KEY")
+const environmentApiKey = (name: string) => Effect.gen(function* () {
+  const apiKey = yield* Config.redacted(name)
   return Redacted.value(apiKey)
 }).pipe(Effect.catch(() => Effect.succeed(undefined)))
 
@@ -347,11 +359,17 @@ const credentialApiKey = (ctx: Plugin.Context, integration: string) =>
     return undefined
   }).pipe(Effect.catch(() => Effect.succeed(undefined)))
 
-const resolveApiKey = (ctx: Plugin.Context, integration: string) =>
+export const resolveApiKey = (
+  options: Pick<Options, "integration" | "apiKeyEnv">,
+  integrationKey: (integration: string) => Effect.Effect<string | undefined>,
+  environmentKey: (name: string) => Effect.Effect<string | undefined>,
+): Effect.Effect<string | undefined> =>
   Effect.gen(function* () {
-    const key = yield* credentialApiKey(ctx, integration)
-    if (key) return key
-    return yield* environmentApiKey
+    if (options.integration) {
+      const key = yield* integrationKey(options.integration)
+      if (key) return key
+    }
+    return options.apiKeyEnv ? yield* environmentKey(options.apiKeyEnv) : undefined
   })
 
 const agentDefinitionResolver = (ctx: Plugin.Context): AgentDefinitionResolver =>
@@ -469,7 +487,7 @@ export const createPlugin = (fetch: Fetch = globalThis.fetch) =>
         const evaluate = yield* createPermissionEvaluator(
           fetch,
           options,
-          resolveApiKey(ctx, options.integration),
+          resolveApiKey(options, (integration) => credentialApiKey(ctx, integration), environmentApiKey),
           agentDefinitionResolver(ctx),
         )
         yield* ctx.permission.hook("evaluate", (event) =>

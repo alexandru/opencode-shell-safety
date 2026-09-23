@@ -4,7 +4,7 @@ An OpenCode v2 plugin that uses [Jev](https://en.wikipedia.org/wiki/Jev_(AI_mode
 to classify shell permission requests against the active agent definition and
 its filesystem policy.
 
-## Install
+## Install with OpenCode Zen
 
 Add the plugin to `~/.config/opencode/opencode.jsonc` to use it across projects.
 OpenCode installs configured package plugins; you do not need to install the
@@ -19,44 +19,9 @@ package separately. For one project, use its `opencode.jsonc` instead.
         "endpoint": "https://opencode.ai/zen/v1/systemone",
         "model": "jev-1.13",
         "integration": "opencode",
-        "allowProbability": 0.45,
-        "violationProbability": 0.4,
-        "timeoutMs": 15000,
-        "maxAttempts": 2,
-        "retryDelayMs": 250,
-        "cache": {
-          "capacity": 256,
-          "ttlMs": 300000
-        },
         "agents": {
           "Explorer": {
-            "enabled": true,
-            "http": {
-              "methods": [],
-              "credentials": {}
-            }
-          },
-          "Librarian": {
-            "enabled": true,
-            "http": {
-              "methods": ["GET", "HEAD"],
-              "credentials": {
-                "BRAVE_SEARCH_API_KEY": ["api.search.brave.com"]
-              }
-            }
-          },
-          "Junior": {
-            "enabled": true,
-            "thresholds": {
-              "allowProbability": 0.35,
-              "violationProbability": 0.5
-            },
-            "http": {
-              "methods": ["GET", "HEAD"],
-              "credentials": {
-                "BRAVE_SEARCH_API_KEY": ["api.search.brave.com"]
-              }
-            }
+            "enabled": true
           }
         }
       }
@@ -65,8 +30,34 @@ package separately. For one project, use its `opencode.jsonc` instead.
 }
 ```
 
-The plugin first resolves the named OpenCode integration credential. If that
-does not provide a key, it reads `OPENCODE_API_KEY` from the server environment.
+For a manual key instead, replace `integration` with
+`"apiKeyEnv": "OPENCODE_API_KEY"`.
+
+## Use TypeSafe AI
+
+Get an API key from [TypeSafe AI](https://docs.typesafe.ai/introduction/quickstart)
+and set `TYPESAFE_API_KEY` in the OpenCode server environment. Add this plugin
+configuration to `opencode.jsonc` instead of the OpenCode Zen example above:
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "opencode-shell-safety",
+      "options": {
+        "endpoint": "https://api.typesafe.ai/v1/systemone",
+        "model": "jev-1.13.0",
+        "apiKeyEnv": "TYPESAFE_API_KEY",
+        "agents": {
+          "Explorer": {
+            "enabled": true
+          }
+        }
+      }
+    }
+  ]
+}
+```
 
 ## Options
 
@@ -74,7 +65,8 @@ does not provide a key, it reads `OPENCODE_API_KEY` from the server environment.
 | --- | --- |
 | `endpoint` | SystemOne HTTP endpoint. |
 | `model` | Model sent in each classification request. |
-| `integration` | OpenCode integration used to resolve the Zen credential. |
+| `integration` | OpenCode integration whose credential takes precedence over `apiKeyEnv`. |
+| `apiKeyEnv` | Environment variable to read if no integration credential is available. |
 | `allowProbability` | Minimum `withinPolicy` probability required to allow a command. |
 | `violationProbability` | Probability at or above which a filesystem, remote-mutation, or credential violation denies a command. |
 | `timeoutMs` | Timeout for one request attempt. |
@@ -84,17 +76,14 @@ does not provide a key, it reads `OPENCODE_API_KEY` from the server environment.
 | `cache.ttlMs` | Successful classification cache lifetime in milliseconds. |
 | `agents.<name>.enabled` | Enables classification for an agent. |
 | `agents.<name>.thresholds` | Optional per-agent probability thresholds. |
+| `agents.<name>.http` | Optional. Omission permits no HTTP methods or credential hosts. |
 | `agents.<name>.http.methods` | HTTP methods the policy permits. |
 | `agents.<name>.http.credentials` | Environment credential names mapped to allowed HTTPS hosts. |
 
-All options are required except each agent's `thresholds` field.
+Set at least one of `integration` or `apiKeyEnv`.
 
-## Configure agents
-
-- Define agents in [OpenCode](https://opencode.ai/v2/docs/agents). Plugin
-  `agents` entries do not create them.
-- Replace `Explorer`, `Librarian`, and `Junior` with your agent names. Only
-  entries with `enabled: true` are classified.
+The plugin sends the selected credential to `endpoint`. Check the URL when
+configuring a custom endpoint.
 
 ## Development
 

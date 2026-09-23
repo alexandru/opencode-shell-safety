@@ -31,6 +31,7 @@ const options = {
   endpoint: "https://opencode.ai/zen/v1/systemone",
   model: "jev-1.13",
   integration: "opencode",
+  apiKeyEnv: "OPENCODE_API_KEY",
   allowProbability: 0.45,
   violationProbability: 0.4,
   timeoutMs: 15000,

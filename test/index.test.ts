@@ -7,6 +7,7 @@ import {
   decodeOptions,
   encodeAgentDefinition,
   permissionFromAssessment,
+  resolveApiKey,
   resolveAgentDefinition,
   type AgentPolicy,
   type Fetch,
@@ -19,6 +20,7 @@ const options: Options = {
   endpoint: "https://opencode.ai/zen/v1/systemone",
   model: "jev-1.13",
   integration: "opencode",
+  apiKeyEnv: "OPENCODE_API_KEY",
   allowProbability: 0.45,
   violationProbability: 0.4,
   timeoutMs: 8_000,
@@ -95,7 +97,7 @@ const evaluator = (fetch: Fetch) =>
     Effect.map((evaluate) => (event: PermissionEvent) => evaluate(event, "/home/dev/project")),
   )
 
-const librarianEvent = (command: string): PermissionEvent => ({
+const librarianEvent = (command: string): PermissionEvent & { readonly agent: string } => ({
   sessionID: "session",
   agent: "Librarian",
   action: "shell",
@@ -104,6 +106,148 @@ const librarianEvent = (command: string): PermissionEvent => ({
 })
 
 describe("configuration", () => {
+  test("uses an integration without requiring an environment variable", async () => {
+    const decoded = await Effect.runPromise(decodeOptions(JSON.stringify({
+      endpoint: "https://opencode.ai/zen/v1/systemone",
+      model: "jev-1.13",
+      integration: "opencode",
+      agents: { Explorer: { enabled: true } },
+    })))
+    const readNames: string[] = []
+    const key = await Effect.runPromise(resolveApiKey(
+      decoded,
+      (name) => Effect.succeed(name === "opencode" ? "integration-key" : undefined),
+      (name) => Effect.sync(() => { readNames.push(name); return "environment-key" }),
+    ))
+    expect(key).toBe("integration-key")
+    expect(readNames).toEqual([])
+  })
+
+  test("rejects configuration without either credential source", async () => {
+    const decoded = await Effect.runPromiseExit(decodeOptions(JSON.stringify({
+      endpoint: "https://api.typesafe.ai/v1/systemone",
+      model: "jev-1.13.0",
+      agents: { Explorer: { enabled: true } },
+    })))
+    expect(Exit.isFailure(decoded)).toBeTrue()
+  })
+
+  test("TypeSafe configuration without an integration reads only its environment key", async () => {
+    const decoded = await Effect.runPromise(decodeOptions(JSON.stringify({
+      endpoint: "https://api.typesafe.ai/v1/systemone",
+      model: "jev-1.13.0",
+      apiKeyEnv: "TYPESAFE_API_KEY",
+      agents: { Explorer: { enabled: true } },
+    })))
+    const integrationLookups: string[] = []
+    const key = await Effect.runPromise(resolveApiKey(
+      decoded,
+      (name) => Effect.sync(() => { integrationLookups.push(name); return "integration-key" }),
+      (name) => Effect.succeed(name === "TYPESAFE_API_KEY" ? "typesafe-key" : undefined),
+    ))
+    expect(key).toBe("typesafe-key")
+    expect(integrationLookups).toEqual([])
+  })
+
+  test("uses the documented defaults when tuning settings are omitted", async () => {
+    const decoded = await Effect.runPromise(decodeOptions(JSON.stringify({
+      endpoint: "https://opencode.ai/zen/v1/systemone",
+      model: "jev-1.13",
+      integration: "opencode",
+      apiKeyEnv: "OPENCODE_API_KEY",
+      agents: { Explorer: { enabled: true } },
+    })))
+    expect(decoded.allowProbability).toBe(0.45)
+    expect(decoded.violationProbability).toBe(0.4)
+    expect(decoded.timeoutMs).toBe(15000)
+    expect(decoded.maxAttempts).toBe(2)
+    expect(decoded.retryDelayMs).toBe(250)
+    expect(decoded.cache).toEqual({ capacity: 256, ttlMs: 300000 })
+  })
+
+  test("fills in missing cache values without replacing configured values", async () => {
+    const decoded = await Effect.runPromise(decodeOptions(JSON.stringify({ ...options, cache: { capacity: 12 } })))
+    expect(decoded.cache).toEqual({ capacity: 12, ttlMs: 300000 })
+  })
+
+  test("omitted HTTP policy forbids methods and credential hosts", async () => {
+    const decoded = await Effect.runPromise(decodeOptions(JSON.stringify({
+      ...options,
+      agents: { Librarian: { enabled: true } },
+    })))
+    const policy = agentPolicy(decoded.agents, "Librarian")
+    const request = buildRequest(librarianEvent("list directory"), decoded.model, policy, agentDefinition, "/home/dev/project")
+    expect(request.state.policy.http).toEqual({ methods: [], credentials: {} })
+  })
+
+  test("fills in omitted fields of a partial HTTP policy", async () => {
+    const decoded = await Effect.runPromise(decodeOptions(JSON.stringify({
+      ...options,
+      agents: {
+        Explorer: { enabled: true, http: { methods: ["GET"] } },
+        Librarian: { enabled: true, http: { credentials: { SERVICE_KEY: ["api.example.com"] } } },
+      },
+    })))
+    expect(agentPolicy(decoded.agents, "Explorer").http).toEqual({
+      methods: ["GET"],
+      credentials: {},
+    })
+    expect(agentPolicy(decoded.agents, "Librarian").http).toEqual({
+      methods: [],
+      credentials: { SERVICE_KEY: ["api.example.com"] },
+    })
+  })
+
+  test("reads the configured TypeSafe environment variable", async () => {
+    const key = await Effect.runPromise(
+      resolveApiKey(
+        { integration: "typesafe", apiKeyEnv: "TYPESAFE_API_KEY" },
+        () => Effect.succeed(undefined),
+        (name) => Effect.succeed(name === "TYPESAFE_API_KEY" ? "typesafe-key" : undefined),
+      ),
+    )
+    expect(key).toBe("typesafe-key")
+  })
+
+  test("prefers the selected provider's integration credential over its environment key", async () => {
+    const readNames: string[] = []
+    const key = await Effect.runPromise(
+      resolveApiKey(
+        { integration: "typesafe", apiKeyEnv: "TYPESAFE_API_KEY" },
+        (name) => Effect.succeed(name === "typesafe" ? "integration-key" : undefined),
+        (name) => Effect.sync(() => { readNames.push(name); return "environment-key" }),
+      ),
+    )
+    expect(key).toBe("integration-key")
+    expect(readNames).toEqual([])
+  })
+
+  test("uses the configured environment variable regardless of its name", async () => {
+    const lookups: string[] = []
+    const key = await Effect.runPromise(
+      resolveApiKey(
+        { integration: "typesafe", apiKeyEnv: "OPENCODE_API_KEY" },
+        (name) => Effect.sync(() => { lookups.push(name); return undefined }),
+        (name) => Effect.sync(() => { lookups.push(name); return "environment-key" }),
+      ),
+    )
+    expect(key).toBe("environment-key")
+    expect(lookups).toEqual(["typesafe", "OPENCODE_API_KEY"])
+  })
+
+  test("uses arbitrary integration and environment variable names", async () => {
+    const lookups: string[] = []
+    const key = await Effect.runPromise(
+      resolveApiKey(
+        { integration: "custom", apiKeyEnv: "CUSTOM_API_TOKEN" },
+        (name) => Effect.sync(() => { lookups.push(name); return undefined }),
+        (name) => Effect.sync(() => { lookups.push(name); return "environment-key" }),
+      ),
+    )
+    expect(key).toBe("environment-key")
+    expect(lookups).toEqual(["custom", "CUSTOM_API_TOKEN"])
+  })
+
   test("decodes generic per-agent integration policy and cache settings", async () => {
     const decoded = await Effect.runPromise(decodeOptions(JSON.stringify(options)))
     expect(agentPolicy(decoded.agents, "Librarian").http.credentials["BRAVE_SEARCH_API_KEY"]).toEqual([
@@ -156,6 +300,17 @@ describe("agent definition", () => {
 })
 
 describe("Jev request", () => {
+  test("does not follow redirects when sending credentials", async () => {
+    let redirect: RequestRedirect | undefined
+    const evaluate = await Effect.runPromise(evaluator(async (_input, init) => {
+      redirect = init?.redirect
+      return effectResponse(assessment(0.9, 0.01, 0.01, 0.01))
+    }))
+    const event = librarianEvent("list directory")
+    await Effect.runPromise(evaluate(event))
+    expect(redirect).toBe("error")
+  })
+
   test("passes the complete agent definition and project directory", () => {
     const event: PermissionEvent & { readonly agent: string } = {
       sessionID: "session",
