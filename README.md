@@ -1,5 +1,7 @@
 # opencode-shell-safety
 
+[![npm version](https://img.shields.io/npm/v/opencode-shell-safety)](https://www.npmjs.com/package/opencode-shell-safety)
+
 An OpenCode v2 plugin that uses [Jev](https://en.wikipedia.org/wiki/Jev_(AI_model))
 to classify shell permission requests against the active agent definition and
 its filesystem policy.
