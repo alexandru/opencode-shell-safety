@@ -4,6 +4,8 @@ An OpenCode v2 plugin that uses [Jev](https://en.wikipedia.org/wiki/Jev_(AI_mode
 to classify shell permission requests against the active agent definition and
 its filesystem policy.
 
+See it in use in my [OpenCode configuration](https://github.com/alexandru/opencode-config).
+
 ## Configuration
 
 ### With OpenCode Zen
