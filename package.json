@@ -1,0 +1,45 @@
+{
+  "name": "opencode-shell-safety",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that classifies shell permission requests against agent policy.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "bun test test/index.test.ts",
+    "test:e2e": "bun test ./test/shell-safety.e2e.ts --timeout 120000",
+    "prepublishOnly": "bun run check && bun run test"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.12",
+    "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/json-schema": "7.0.15",
+    "typescript": "5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexandru/opencode-shell-safety.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alexandru/opencode-shell-safety/issues"
+  },
+  "homepage": "https://github.com/alexandru/opencode-shell-safety#readme",
+  "keywords": [
+    "opencode",
+    "plugin",
+    "shell",
+    "security"
+  ],
+  "engines": {
+    "bun": ">=1.4.2"
+  }
+}
