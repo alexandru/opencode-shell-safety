@@ -4,11 +4,11 @@ An OpenCode v2 plugin that uses [Jev](https://en.wikipedia.org/wiki/Jev_(AI_mode
 to classify shell permission requests against the active agent definition and
 its filesystem policy.
 
-## Install with OpenCode Zen
+## Configuration
 
-Add the plugin to `~/.config/opencode/opencode.jsonc` to use it across projects.
-OpenCode installs configured package plugins; you do not need to install the
-package separately. For one project, use its `opencode.jsonc` instead.
+### With OpenCode Zen
+
+[OpenCode Zen](https://opencode.ai/zen) provides access to Jew. Create an account, and an API token, then add the plugin to `~/.config/opencode/opencode.jsonc`:
 
 ```jsonc
 {
@@ -30,14 +30,15 @@ package separately. For one project, use its `opencode.jsonc` instead.
 }
 ```
 
-For a manual key instead, replace `integration` with
-`"apiKeyEnv": "OPENCODE_API_KEY"`.
+The `"integration": "opencode"` assumes authentication via `opencode auth login`. As an alternative, replace `integration` with the name of the environment variable that stores the API token:
 
-## Use TypeSafe AI
+```json
+"apiKeyEnv": "OPENCODE_API_KEY"
+```
 
-Get an API key from [TypeSafe AI](https://docs.typesafe.ai/introduction/quickstart)
-and set `TYPESAFE_API_KEY` in the OpenCode server environment. Add this plugin
-configuration to `opencode.jsonc` instead of the OpenCode Zen example above:
+### Via the TypeSafe AI
+
+Get an API key from [TypeSafe AI](https://docs.typesafe.ai/introduction/quickstart) and set `TYPESAFE_API_KEY` environment variable. Add this plugin configuration to `opencode.jsonc`:
 
 ```jsonc
 {
