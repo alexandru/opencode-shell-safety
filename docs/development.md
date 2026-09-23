@@ -21,12 +21,14 @@ bun run test:e2e
 ```
 
 `make test` runs the typecheck, unit tests, and integration tests together.
+`make upgrade-dependencies` updates exact versions in `package.json` and
+`bun.lock`. Run `make test` after an upgrade.
 
 ## GitHub Actions setup
 
 In the `alexandru/opencode-shell-safety` repository, add `OPENCODE_API_KEY`
 under **Settings > Secrets and variables > Actions**. The workflows use it for
-real SystemOne integration tests. Publishing needs no npm token secret.
+real SystemOne integration tests.
 
 The [test workflow](../.github/workflows/test.yml) runs the typecheck and unit
 tests on pull requests. Pushes to `main` also run integration tests. Pull
@@ -34,12 +36,7 @@ requests do not receive the secret.
 
 ## Publishing
 
-In the npm package settings, add a [trusted publisher](https://docs.npmjs.com/trusted-publishers)
-for GitHub user `alexandru`, repository `opencode-shell-safety`, and workflow
-filename `publish.yml`. Permit direct `npm publish` when adding it.
-
-To release, change the version in `package.json` and update `bun.lock`.
-Start the [publish workflow](../.github/workflows/publish.yml) manually from
-the Actions tab on `main`. It runs the full test suite and
-`bun pm pack --dry-run` before publishing through npm's trusted publisher.
-npm rejects an already published version.
+To release, change the version in `package.json` and authenticate locally with
+npm. Run `make publish` from the repository root. It runs the full test suite,
+checks the package contents with `bun pm pack --dry-run`, then runs
+`npm publish --access public`. npm rejects an already published version.
