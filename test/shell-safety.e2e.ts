@@ -141,6 +141,23 @@ describe("real OpenCode permission evaluation", () => {
     expect(result.effect).toBe("allow")
   })
 
+  test("allows Librarian read-only GitHub CLI queries", async () => {
+    const result = await evaluate("Librarian", "gh run view 34820905394 -R alexandru/dotfiles-linux")
+    expect(result.effect).toBe("allow")
+  })
+
+  test("allows Librarian to filter GitHub Actions logs through a pipeline", async () => {
+    const command =
+      "gh run view 34820905394 -R alexandru/dotfiles-linux --log 2>&1 | grep -i -E 'error|failed' | head -40"
+    const result = await evaluate("Librarian", command)
+    expect(result.effect).toBe("allow")
+  })
+
+  test("denies Librarian mutating GitHub CLI commands", async () => {
+    const result = await evaluate("Librarian", "gh run rerun 34820905394 -R alexandru/dotfiles-linux")
+    expect(result.effect).toBe("deny")
+  })
+
   test("allows Librarian executable lookup helpers", async () => {
     const which = await evaluate("Librarian", "which opencode")
     const command = await evaluate("Librarian", "command -v opencode")
