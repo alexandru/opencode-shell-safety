@@ -86,7 +86,13 @@ const rejectPendingFor = async (
   }
 }
 
-const evaluate = async (agent: string, command: string): Promise<PermissionResult> => {
+const commandResources = (command: string | ReadonlyArray<string>): ReadonlyArray<string> =>
+  typeof command === "string" ? [command] : command
+
+const evaluate = async (
+  agent: string,
+  command: string | ReadonlyArray<string>,
+): Promise<PermissionResult> => {
   if (session === undefined) throw new Error("OpenCode session is not started")
   return evaluateFor(session, agent, command)
 }
@@ -94,7 +100,7 @@ const evaluate = async (agent: string, command: string): Promise<PermissionResul
 const evaluateFor = async (
   target: Session,
   agent: string,
-  command: string,
+  command: string | ReadonlyArray<string>,
   targetRuntime: IsolatedOpenCode = activeRuntime(),
 ): Promise<PermissionResult> => {
   const response = await apiFor(
@@ -102,7 +108,7 @@ const evaluateFor = async (
     PermissionResponse,
     "POST",
     `/api/session/${target.id}/permission`,
-    JSON.stringify({ action: "shell", resources: [command], agent }),
+    JSON.stringify({ action: "shell", resources: commandResources(command), agent }),
   )
   await rejectPendingFor(target, targetRuntime)
   return response.data
@@ -282,11 +288,19 @@ describe("real OpenCode permission evaluation", () => {
     expect(result.effect).toBe("ask")
   })
 
-  test("asks the user about a forbidden suffix after an allowed Librarian command", async () => {
+  test("denies a forbidden suffix after an allowed Librarian command", async () => {
     const result = await evaluate(
       "Librarian",
       "cellar get-external org.typelevel:cats-effect_3:3.7.1 cats.effect.Resource; touch /home/dev/jev-librarian-chained-write",
     )
+    expect(result.effect).toBe("deny")
+  })
+
+  test("asks the user about a compound command with a subcommand outside the allow rules", async () => {
+    const result = await evaluate("Librarian", [
+      "cellar get-external org.typelevel:cats-effect_3:3.7.1 cats.effect.Resource",
+      "touch /home/dev/jev-librarian-chained-write",
+    ])
     expect(result.effect).toBe("ask")
   })
 
