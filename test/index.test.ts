@@ -12,6 +12,7 @@ import {
   type AgentPolicy,
   type Fetch,
   type Options,
+  type PermissionEffect,
   type PermissionEvent,
   type SafetyAssessment,
 } from "../src/index"
@@ -454,7 +455,7 @@ describe("permission hook", () => {
     expect(event.effect).toBe("allow")
   })
 
-  test("asks the user when the session directory is unavailable", async () => {
+  test("denies the command when the session directory is unavailable", async () => {
     let requests = 0
     const evaluate = await Effect.runPromise(
       createPermissionEvaluator(
@@ -472,7 +473,7 @@ describe("permission hook", () => {
     await Effect.runPromise(evaluate(event))
 
     expect(requests).toBe(0)
-    expect(event.effect).toBe("ask")
+    expect(event.effect).toBe("deny")
     expect(event.message).toContain("session directory is unavailable")
   })
 
@@ -570,7 +571,7 @@ describe("permission hook", () => {
     expect(event.effect).toBe("allow")
   })
 
-  test("asks the user to decide a command Jev rejects", async () => {
+  test("denies a command Jev rejects by default", async () => {
     const evaluate = await Effect.runPromise(
       evaluator(async () => effectResponse(assessment(0.2, 0.63, 0.08, 0.11))),
     )
@@ -578,20 +579,22 @@ describe("permission hook", () => {
 
     await Effect.runPromise(evaluate(event))
 
-    expect(event.effect).toBe("ask")
-    expect(event.message).toContain("Jev rejected this command.")
-    expect(event.message).not.toContain("Rewrite the command")
+    expect(event.effect).toBe("deny")
+    expect(event.message).toContain(
+      "Rewrite the command to comply with your system prompt and permissions, or report the limitation if no compliant form exists.",
+    )
+    expect(event.message).not.toContain("Jev rejected this command.")
     expect(event.message).toContain("withinPolicy=0.200")
     expect(event.message).toContain("filesystemViolation=0.630")
   })
 
-  test("falls back to ask when the Jev request fails", async () => {
+  test("denies the command when the Jev request fails", async () => {
     const evaluate = await Effect.runPromise(evaluator(async () => new Response("unavailable", { status: 503 })))
     const event = librarianEvent("curl https://example.com")
 
     await Effect.runPromise(evaluate(event))
 
-    expect(event.effect).toBe("ask")
+    expect(event.effect).toBe("deny")
     expect(event.message).toContain("HTTP 503 after 2 attempts")
   })
 
@@ -619,7 +622,7 @@ describe("permission hook", () => {
 
     await Effect.runPromise(evaluate(event))
 
-    expect(event.effect).toBe("ask")
+    expect(event.effect).toBe("deny")
     expect(event.message).toContain("HTTP 429 after 2 attempts")
   })
 
@@ -636,7 +639,7 @@ describe("permission hook", () => {
     await Effect.runPromise(evaluate(event))
 
     expect(attempts).toBe(1)
-    expect(event.effect).toBe("ask")
+    expect(event.effect).toBe("deny")
     expect(event.message).toContain("HTTP 401 after 1 attempt")
   })
 
@@ -673,7 +676,7 @@ describe("permission hook", () => {
     expect(event.message).toContain("HTTP 503 after 2 attempts")
   })
 
-  test("falls back to the configured default when no credential is available", async () => {
+  test("denies commands when no credential is available", async () => {
     const evaluate = await Effect.runPromise(
       createPermissionEvaluator(
         async () => {
@@ -696,13 +699,13 @@ describe("permission hook", () => {
     await Effect.runPromise(evaluate(askEvent, "/home/dev/project"))
     await Effect.runPromise(evaluate(allowEvent, "/home/dev/project"))
 
-    expect(askEvent.effect).toBe("ask")
+    expect(askEvent.effect).toBe("deny")
     expect(askEvent.message).toContain("no OpenCode Zen credential is available")
     expect(allowEvent.effect).toBe("deny")
     expect(allowEvent.message).toContain("no OpenCode Zen credential is available")
   })
 
-  test("falls back to the configured default when the agent definition is unavailable", async () => {
+  test("denies the command when the agent definition is unavailable", async () => {
     const evaluate = await Effect.runPromise(
       createPermissionEvaluator(
         async () => {
@@ -717,7 +720,96 @@ describe("permission hook", () => {
 
     await Effect.runPromise(evaluate(event, "/home/dev/project"))
 
-    expect(event.effect).toBe("ask")
+    expect(event.effect).toBe("deny")
     expect(event.message).toContain("resolved Librarian definition is unavailable")
+  })
+})
+
+describe("fallback action", () => {
+  const askFallbackOptions: Options = {
+    ...options,
+    agents: {
+      Researcher: { enabled: true, fallback: "ask", http: { methods: [], credentials: {} } },
+    },
+  }
+
+  const askFallbackEvaluator = (fetch: Fetch) =>
+    createPermissionEvaluator(
+      fetch,
+      askFallbackOptions,
+      Effect.succeed("test-key"),
+      () => Effect.succeed(agentDefinition),
+    )
+
+  const researcherEvent = (effect: PermissionEffect, command: string): PermissionEvent => ({
+    sessionID: "session",
+    agent: "Researcher",
+    action: "shell",
+    resources: [command],
+    effect,
+  })
+
+  test("decodes an optional per-agent fallback action", async () => {
+    const decoded = await Effect.runPromise(decodeOptions(JSON.stringify(options)))
+    expect(agentPolicy(decoded.agents, "Librarian").fallback).toBeUndefined()
+
+    const configured = await Effect.runPromise(
+      decodeOptions(JSON.stringify({
+        ...options,
+        agents: {
+          Researcher: { enabled: true, fallback: "ask", http: { methods: [], credentials: {} } },
+          Reviewer: { enabled: true, fallback: "deny", http: { methods: [], credentials: {} } },
+        },
+      })),
+    )
+    expect(agentPolicy(configured.agents, "Researcher").fallback).toBe("ask")
+    expect(agentPolicy(configured.agents, "Reviewer").fallback).toBe("deny")
+  })
+
+  test("rejects an invalid fallback action", async () => {
+    const decoded = await Effect.runPromiseExit(
+      decodeOptions(JSON.stringify({
+        ...options,
+        agents: { Researcher: { enabled: true, fallback: "allow", http: { methods: [], credentials: {} } } },
+      })),
+    )
+    expect(Exit.isFailure(decoded)).toBeTrue()
+  })
+
+  test("asks the configured fallback action when Jev rejects", async () => {
+    const evaluate = await Effect.runPromise(
+      askFallbackEvaluator(async () => effectResponse(assessment(0.2, 0.63, 0.08, 0.11))),
+    )
+    const event = researcherEvent("ask", "unsafe command")
+
+    await Effect.runPromise(evaluate(event, "/home/dev/project"))
+
+    expect(event.effect).toBe("ask")
+    expect(event.message).toContain("Jev rejected this command.")
+    expect(event.message).not.toContain("Rewrite the command")
+  })
+
+  test("asks the configured fallback action when classification fails", async () => {
+    const evaluate = await Effect.runPromise(
+      askFallbackEvaluator(async () => new Response("unavailable", { status: 503 })),
+    )
+    const event = researcherEvent("ask", "curl https://example.com")
+
+    await Effect.runPromise(evaluate(event, "/home/dev/project"))
+
+    expect(event.effect).toBe("ask")
+    expect(event.message).toContain("HTTP 503 after 2 attempts")
+  })
+
+  test("honors the ask fallback for an allowed command with shell expansion", async () => {
+    const evaluate = await Effect.runPromise(
+      askFallbackEvaluator(async () => effectResponse(assessment(0.2, 0.63, 0.08, 0.11))),
+    )
+    const event = researcherEvent("allow", `printf '%s\n' "$BRAVE_SEARCH_API_KEY"`)
+
+    await Effect.runPromise(evaluate(event, "/home/dev/project"))
+
+    expect(event.effect).toBe("ask")
+    expect(event.message).toContain("Jev rejected this command.")
   })
 })

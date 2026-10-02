@@ -78,6 +78,7 @@ Get an API key from [TypeSafe AI](https://docs.typesafe.ai/introduction/quicksta
 | `cache.capacity`                 | Maximum number of cached classification results.                                                       |
 | `cache.ttlMs`                    | Successful classification cache lifetime in milliseconds.                                              |
 | `agents.<name>.enabled`          | Enables classification for an agent.                                                                   |
+| `agents.<name>.fallback`         | Optional. Effect applied when classification rejects the command or the request fails: `ask` or `deny`. Defaults to `deny`. |
 | `agents.<name>.thresholds`       | Optional per-agent probability thresholds.                                                             |
 | `agents.<name>.http`             | Optional. Omission permits no HTTP methods or credential hosts.                                        |
 | `agents.<name>.http.methods`     | HTTP methods the policy permits.                                                                       |

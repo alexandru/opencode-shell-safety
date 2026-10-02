@@ -60,6 +60,7 @@ const options = {
     },
     Solo: {
       enabled: true,
+      fallback: "ask",
     },
   },
 }

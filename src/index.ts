@@ -33,6 +33,8 @@ const ThresholdsSchema = Schema.Struct({
   violationProbability: Probability,
 })
 
+const FallbackEffectSchema = Schema.Literals(["ask", "deny"])
+
 const HttpPolicySchema = Schema.Struct({
   methods: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   credentials: Schema.Record(Schema.String, Schema.Array(Schema.String))
@@ -41,6 +43,7 @@ const HttpPolicySchema = Schema.Struct({
 
 const AgentPolicySchema = Schema.Struct({
   enabled: Schema.Boolean,
+  fallback: Schema.optionalKey(FallbackEffectSchema),
   thresholds: Schema.optionalKey(ThresholdsSchema),
   http: HttpPolicySchema.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ methods: [], credentials: {} }))),
 })
@@ -75,6 +78,7 @@ export const OptionsSchema = Schema.Struct({
 
 export type Options = typeof OptionsSchema.Type
 export type AgentPolicy = typeof AgentPolicySchema.Type
+export type FallbackEffect = typeof FallbackEffectSchema.Type
 export type Thresholds = typeof ThresholdsSchema.Type
 
 const NoulAnswerSchema = Schema.Struct({
@@ -174,8 +178,7 @@ export const permissionFromAssessment = (
   return assessment.withinPolicy.noul >= thresholds.allowProbability && !hasViolation ? "allow" : "deny"
 }
 
-export const fallbackEffect = (configured: PermissionEffect): PermissionEffect =>
-  configured === "allow" ? "deny" : configured
+export const fallbackEffect = (fallback: FallbackEffect | undefined): PermissionEffect => fallback ?? "deny"
 
 const noulQuestion = (instructions: string, yes: string, no: string): NoulQuestion => ({
   type: "noul",
@@ -448,7 +451,7 @@ export const createPermissionEvaluator = (
       const policy = findPolicy(options, agent)
       if (!policy?.enabled) return Effect.void
       const classifiedEvent = { ...event, agent }
-      const fallback = fallbackEffect(event.effect)
+      const fallback = fallbackEffect(policy.fallback)
 
       return Effect.gen(function* () {
         if (!projectDirectory) {
