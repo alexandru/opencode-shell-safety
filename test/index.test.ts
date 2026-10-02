@@ -428,6 +428,9 @@ describe("permission hook", () => {
 
     expect(requests).toBe(1)
     expect(event.effect).toBe("deny")
+    expect(event.message).toContain(
+      "Rewrite the command to comply with your system prompt and permissions, or report the limitation if no compliant form exists.",
+    )
   })
 
   test("uses the permission session's project directory", async () => {
@@ -451,7 +454,7 @@ describe("permission hook", () => {
     expect(event.effect).toBe("allow")
   })
 
-  test("denies classification when the session directory is unavailable", async () => {
+  test("asks the user when the session directory is unavailable", async () => {
     let requests = 0
     const evaluate = await Effect.runPromise(
       createPermissionEvaluator(
@@ -469,7 +472,7 @@ describe("permission hook", () => {
     await Effect.runPromise(evaluate(event))
 
     expect(requests).toBe(0)
-    expect(event.effect).toBe("deny")
+    expect(event.effect).toBe("ask")
     expect(event.message).toContain("session directory is unavailable")
   })
 
@@ -567,7 +570,7 @@ describe("permission hook", () => {
     expect(event.effect).toBe("allow")
   })
 
-  test("tells the agent to rewrite a command rejected by policy", async () => {
+  test("asks the user to decide a command Jev rejects", async () => {
     const evaluate = await Effect.runPromise(
       evaluator(async () => effectResponse(assessment(0.2, 0.63, 0.08, 0.11))),
     )
@@ -575,21 +578,20 @@ describe("permission hook", () => {
 
     await Effect.runPromise(evaluate(event))
 
-    expect(event.effect).toBe("deny")
-    expect(event.message).toContain(
-      "Rewrite the command to comply with your system prompt and permissions, or report the limitation if no compliant form exists.",
-    )
+    expect(event.effect).toBe("ask")
+    expect(event.message).toContain("Jev rejected this command.")
+    expect(event.message).not.toContain("Rewrite the command")
     expect(event.message).toContain("withinPolicy=0.200")
     expect(event.message).toContain("filesystemViolation=0.630")
   })
 
-  test("denies without escalating when the Jev request fails", async () => {
+  test("falls back to ask when the Jev request fails", async () => {
     const evaluate = await Effect.runPromise(evaluator(async () => new Response("unavailable", { status: 503 })))
     const event = librarianEvent("curl https://example.com")
 
     await Effect.runPromise(evaluate(event))
 
-    expect(event.effect).toBe("deny")
+    expect(event.effect).toBe("ask")
     expect(event.message).toContain("HTTP 503 after 2 attempts")
   })
 
@@ -617,7 +619,7 @@ describe("permission hook", () => {
 
     await Effect.runPromise(evaluate(event))
 
-    expect(event.effect).toBe("deny")
+    expect(event.effect).toBe("ask")
     expect(event.message).toContain("HTTP 429 after 2 attempts")
   })
 
@@ -634,7 +636,88 @@ describe("permission hook", () => {
     await Effect.runPromise(evaluate(event))
 
     expect(attempts).toBe(1)
-    expect(event.effect).toBe("deny")
+    expect(event.effect).toBe("ask")
     expect(event.message).toContain("HTTP 401 after 1 attempt")
+  })
+
+  test("allows an allowed command with shell expansion when Jev approves", async () => {
+    const evaluate = await Effect.runPromise(
+      evaluator(async () => effectResponse(assessment(0.98, 0.01, 0.01, 0.01))),
+    )
+    const event: PermissionEvent = {
+      sessionID: "session",
+      agent: "Librarian",
+      action: "shell",
+      resources: [`printf '%s\n' "$BRAVE_SEARCH_API_KEY"`],
+      effect: "allow",
+    }
+
+    await Effect.runPromise(evaluate(event))
+
+    expect(event.effect).toBe("allow")
+  })
+
+  test("denies an allowed command with shell expansion when classification fails", async () => {
+    const evaluate = await Effect.runPromise(evaluator(async () => new Response("unavailable", { status: 503 })))
+    const event: PermissionEvent = {
+      sessionID: "session",
+      agent: "Librarian",
+      action: "shell",
+      resources: [`printf '%s\n' "$BRAVE_SEARCH_API_KEY"`],
+      effect: "allow",
+    }
+
+    await Effect.runPromise(evaluate(event))
+
+    expect(event.effect).toBe("deny")
+    expect(event.message).toContain("HTTP 503 after 2 attempts")
+  })
+
+  test("falls back to the configured default when no credential is available", async () => {
+    const evaluate = await Effect.runPromise(
+      createPermissionEvaluator(
+        async () => {
+          throw new Error("should not be called")
+        },
+        options,
+        Effect.succeed(undefined),
+        () => Effect.succeed(agentDefinition),
+      ),
+    )
+    const askEvent = librarianEvent("inspect project")
+    const allowEvent: PermissionEvent = {
+      sessionID: "session",
+      agent: "Librarian",
+      action: "shell",
+      resources: [`printf '%s\n' "$BRAVE_SEARCH_API_KEY"`],
+      effect: "allow",
+    }
+
+    await Effect.runPromise(evaluate(askEvent, "/home/dev/project"))
+    await Effect.runPromise(evaluate(allowEvent, "/home/dev/project"))
+
+    expect(askEvent.effect).toBe("ask")
+    expect(askEvent.message).toContain("no OpenCode Zen credential is available")
+    expect(allowEvent.effect).toBe("deny")
+    expect(allowEvent.message).toContain("no OpenCode Zen credential is available")
+  })
+
+  test("falls back to the configured default when the agent definition is unavailable", async () => {
+    const evaluate = await Effect.runPromise(
+      createPermissionEvaluator(
+        async () => {
+          throw new Error("should not be called")
+        },
+        options,
+        Effect.succeed("test-key"),
+        () => Effect.succeed(undefined),
+      ),
+    )
+    const event = librarianEvent("inspect project")
+
+    await Effect.runPromise(evaluate(event, "/home/dev/project"))
+
+    expect(event.effect).toBe("ask")
+    expect(event.message).toContain("resolved Librarian definition is unavailable")
   })
 })

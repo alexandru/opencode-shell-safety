@@ -24,7 +24,7 @@ const PluginResponse = Schema.Struct({
 
 const repository = fileURLToPath(new URL("../..", import.meta.url))
 const fixtures = fileURLToPath(new URL("../fixtures/agents", import.meta.url))
-const fixtureNames = ["Explorer.md", "Librarian.md", "Junior.md"]
+const fixtureNames = ["Explorer.md", "Librarian.md", "Junior.md", "Solo.md"]
 const password = "shell-safety-e2e"
 
 const options = {
@@ -57,6 +57,9 @@ const options = {
         methods: ["GET", "HEAD"],
         credentials: { BRAVE_SEARCH_API_KEY: ["api.search.brave.com"] },
       },
+    },
+    Solo: {
+      enabled: true,
     },
   },
 }
@@ -110,6 +113,7 @@ const opencodeConfig = () => {
       Junior: { model: "opencode-go/deepseek-v4.1-flash", variant: "max" },
       Explorer: { model: "opencode-go/deepseek-v4.1-flash", variant: "low" },
       Librarian: { model: "opencode-go/deepseek-v4.1-flash", variant: "low" },
+      Solo: { model: "opencode-go/deepseek-v4.1-flash", variant: "low" },
     },
     plugins: [{ package: join(repository, "src"), options }],
     permission: {

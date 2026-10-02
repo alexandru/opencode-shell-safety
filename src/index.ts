@@ -161,16 +161,21 @@ export const resolveAgentDefinition = (agent: Agent.Info): ResolvedAgentDefiniti
     .map((rule) => ({ resource: rule.resource, effect: rule.effect })),
 })
 
+export type ClassificationVerdict = "allow" | "deny"
+
 export const permissionFromAssessment = (
   assessment: SafetyAssessment,
   thresholds: Thresholds,
-): PermissionEffect => {
+): ClassificationVerdict => {
   const hasViolation =
     assessment.filesystemViolation.noul >= thresholds.violationProbability ||
     assessment.remoteMutation.noul >= thresholds.violationProbability ||
     assessment.credentialViolation.noul >= thresholds.violationProbability
   return assessment.withinPolicy.noul >= thresholds.allowProbability && !hasViolation ? "allow" : "deny"
 }
+
+export const fallbackEffect = (configured: PermissionEffect): PermissionEffect =>
+  configured === "allow" ? "deny" : configured
 
 const noulQuestion = (instructions: string, yes: string, no: string): NoulQuestion => ({
   type: "noul",
@@ -221,7 +226,6 @@ export const buildRequest = (
         |
         |Rules:
         |- Decide whether "shellCommand" complies with those instructions and with "state.policy".
-        |- OpenCode invokes this classifier only after permission resolution returns "ask".
         |- An "ask" rule means this classifier must decide from the command's actual effects; it is not a violation.
         |- Shell deny rules remain final.
         |- Apply ordered permission rules with the last matching rule winning.
@@ -387,16 +391,17 @@ const findPolicy = (options: Options, agent: string): AgentPolicy | undefined =>
 const hasShellControlSyntax = (resources: ReadonlyArray<string>): boolean =>
   resources.some((resource) => /[;&|<>`$]/.test(resource))
 
-const summary = (assessment: SafetyAssessment, effect: PermissionEffect): string => {
+const summary = (assessment: SafetyAssessment, verdict: ClassificationVerdict, effect: PermissionEffect): string => {
   const classification =
-    `Jev shell classification: ${effect} (` +
+    `Jev shell classification: ${verdict} (` +
     `withinPolicy=${assessment.withinPolicy.noul.toFixed(3)}, ` +
     `filesystemViolation=${assessment.filesystemViolation.noul.toFixed(3)}, ` +
     `remoteMutation=${assessment.remoteMutation.noul.toFixed(3)}, ` +
     `credentialViolation=${assessment.credentialViolation.noul.toFixed(3)})`
+  if (verdict === "allow") return classification
   return effect === "deny"
     ? `${classification}. Rewrite the command to comply with your system prompt and permissions, or report the limitation if no compliant form exists.`
-    : classification
+    : `${classification}. Jev rejected this command.`
 }
 
 const classificationSucceeded = (assessment: SafetyAssessment): ClassificationResult => ({ ok: true, assessment })
@@ -443,19 +448,22 @@ export const createPermissionEvaluator = (
       const policy = findPolicy(options, agent)
       if (!policy?.enabled) return Effect.void
       const classifiedEvent = { ...event, agent }
+      const fallback = fallbackEffect(event.effect)
 
       return Effect.gen(function* () {
-        event.effect = "deny"
         if (!projectDirectory) {
+          event.effect = fallback
           event.message = "Jev could not classify this command because the session directory is unavailable."
           return
         }
         if (!assessmentCache) {
+          event.effect = fallback
           event.message = "Jev could not classify this command because no OpenCode Zen credential is available."
           return
         }
         const agentDefinition = yield* resolveAgentDefinition(agent)
         if (!agentDefinition) {
+          event.effect = fallback
           event.message = `Jev could not classify this command because the resolved ${agent} definition is unavailable.`
           return
         }
@@ -468,12 +476,14 @@ export const createPermissionEvaluator = (
           Effect.catch((error) => Effect.succeed(classificationFailed(error))),
         )
         if (!result.ok) {
+          event.effect = fallback
           event.message = `Jev could not classify this command (${requestFailure(result.error, options)}).`
           return
         }
 
-        event.effect = permissionFromAssessment(result.assessment, policy.thresholds ?? options)
-        event.message = summary(result.assessment, event.effect)
+        const verdict = permissionFromAssessment(result.assessment, policy.thresholds ?? options)
+        event.effect = verdict === "allow" ? "allow" : fallback
+        event.message = summary(result.assessment, verdict, event.effect)
       })
     }
   })
