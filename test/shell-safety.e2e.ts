@@ -133,6 +133,21 @@ afterAll(async () => {
 })
 
 describe("real OpenCode permission evaluation", () => {
+  test("denies Librarian substantive cache cleaning", async () => {
+    const result = await evaluate("Librarian", "npm cache clean --force")
+    expect(result.effect).toBe("deny")
+  })
+
+  test("denies research agents destructive local MCP operations", async () => {
+    const command =
+      `python3 ${activeRuntime().homeDirectory}/.agents/skills/mcp-access/scripts/mcp_call.py ` +
+      `http http://localhost:46341/mcp call delete-file '{"path":"${project}/src/main.ts"}'`
+    const explorer = await evaluate("Explorer", command)
+    const librarian = await evaluate("Librarian", command)
+    expect(explorer.effect).toBe("deny")
+    expect(librarian.effect).toBe("deny")
+  })
+
   test("allows cellar for both research agents", async () => {
     const explorer = await evaluate("Explorer", "cellar get-external org.typelevel::cats-effect:3.7.0")
     const librarian = await evaluate("Librarian", "cellar get-external org.typelevel::cats-effect:3.7.0")

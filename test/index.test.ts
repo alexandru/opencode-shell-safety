@@ -177,7 +177,14 @@ describe("configuration", () => {
       agents: { Librarian: { enabled: true } },
     })))
     const policy = agentPolicy(decoded.agents, "Librarian")
-    const request = buildRequest(librarianEvent("list directory"), decoded.model, policy, agentDefinition, "/home/dev/project")
+    const request = buildRequest(
+      librarianEvent("list directory"),
+      decoded.model,
+      policy,
+      agentDefinition,
+      "/home/dev/project",
+      "/home/dev",
+    )
     expect(request.state.policy.http).toEqual({ methods: [], credentials: {} })
   })
 
@@ -321,13 +328,14 @@ describe("Jev request", () => {
       effect: "ask",
     }
     const policy = agentPolicy(options.agents, "Librarian")
-    const request = buildRequest(event, options.model, policy, agentDefinition, "/home/dev/project")
+    const request = buildRequest(event, options.model, policy, agentDefinition, "/home/dev/project", "/home/dev")
 
     expect(request.state.shellCommand).toEqual(event.resources)
     expect(request.state.projectDirectory).toBe("/home/dev/project")
     expect(request.state.agentDefinition).toBe(agentDefinition.encoded)
     expect(request.state.filesystemAccess).toEqual({
       projectDirectory: "/home/dev/project",
+      homeDirectory: "/home/dev",
       externalDirectoryRules: [
         { resource: "*", effect: "deny" },
         { resource: "/tmp", effect: "allow" },

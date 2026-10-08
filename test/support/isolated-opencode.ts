@@ -5,6 +5,7 @@ import { Schema } from "effect"
 
 export type IsolatedOpenCode = {
   readonly project: string
+  readonly homeDirectory: string
   readonly url: string
   readonly request: (method: "GET" | "POST" | "DELETE", path: string, body?: string) => Promise<string>
   readonly createProject: (name: string) => Promise<string>
@@ -129,6 +130,8 @@ const opencodeConfig = () => {
         "/private/tmp": "allow",
         "/private/tmp/**": "allow",
         "~/.m2/repository/**": "allow",
+        "~/.npm": "allow",
+        "~/.npm/**": "allow",
         "~/.gradle/caches/**": "allow",
         "~/.ivy2/cache/**": "allow",
         "~/.cache/coursier/**": "allow",
@@ -266,7 +269,7 @@ export const startIsolatedOpenCode = async (projectName?: string): Promise<Isola
       )
     }
     ready = true
-    return { project, url, request, createProject, stop }
+    return { project, homeDirectory: home, url, request, createProject, stop }
   })()
 
   return result.finally(async () => {

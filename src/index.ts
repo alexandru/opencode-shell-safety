@@ -1,4 +1,5 @@
 import { Agent, Plugin } from "@opencode/plugin/effect"
+import { homedir } from "node:os"
 import { Cache, Config, Effect, Exit, Redacted, Schedule, Schema, String as EffectString } from "effect"
 
 export type PermissionEffect = "allow" | "ask" | "deny"
@@ -139,6 +140,7 @@ type SystemOneRequest = {
     readonly agentDefinition: string
     readonly filesystemAccess: {
       readonly projectDirectory: string
+      readonly homeDirectory: string
       readonly externalDirectoryRules: ReadonlyArray<FilesystemPermissionRule>
     }
     readonly policy: AgentPolicy
@@ -202,6 +204,7 @@ export const buildRequest = (
   policy: AgentPolicy,
   agentDefinition: ResolvedAgentDefinition,
   projectDirectory: string,
+  homeDirectory: string,
 ): SystemOneRequest => ({
   model,
   state: {
@@ -212,6 +215,7 @@ export const buildRequest = (
     agentDefinition: agentDefinition.encoded,
     filesystemAccess: {
       projectDirectory,
+      homeDirectory,
       externalDirectoryRules: agentDefinition.externalDirectoryRules,
     },
     policy,
@@ -226,6 +230,7 @@ export const buildRequest = (
         |- Its other fields are the complete resolved agent configuration.
         |- "state.projectDirectory" is the current project directory.
         |- "state.filesystemAccess.externalDirectoryRules" is the complete ordered list of path permissions outside the project directory.
+        |- "state.filesystemAccess.homeDirectory" is the process's home directory, including for implicit tool paths.
         |
         |Rules:
         |- Decide whether "shellCommand" complies with those instructions and with "state.policy".
@@ -233,6 +238,9 @@ export const buildRequest = (
         |- Shell deny rules remain final.
         |- Apply ordered permission rules with the last matching rule winning.
         |- Work explicitly assigned by the full system prompt is within policy when the command performs that work and its effects satisfy all permissions.
+        |- Judge operations by their substantive effects.
+        |- Apply any system-prompt allowance for incidental runtime bookkeeping.
+        |- Incidental runtime bookkeeping does not authorize otherwise forbidden substantive changes.
         |- A Bash command may access only project paths and external paths allowed by the last matching rule in "state.filesystemAccess.externalDirectoryRules".
         |- Apply that path restriction to every filesystem read and write, regardless of whether the command itself is read-only.
         |- Treat the exact path "/dev/null" as a shell output sink, not as a filesystem access or write. Do not extend this exception to any other path under "/dev".
@@ -251,6 +259,7 @@ export const buildRequest = (
         |- An "ask" rule requests this decision and is not itself a violation.
         |- Identify every filesystem path read, inspected, executed, created, changed, or deleted by every command in the shell expression.
         |- Resolve relative paths and stateful "cd" operations from "state.projectDirectory".
+        |- Resolve "~" and implicit home-relative tool paths from "state.filesystemAccess.homeDirectory", not from the project directory or a guessed username.
         |- Normalize "." and ".." components before checking a path.
         |- A successful "cd" changes the working directory for later commands in the same shell expression.
         |- A semicolon does not reset the working directory established by "cd".
@@ -258,6 +267,8 @@ export const buildRequest = (
         |- For every path outside that project directory, apply "state.filesystemAccess.externalDirectoryRules" in order with the last matching rule winning.
         |- An external path is forbidden unless its final matching rule is "allow". This applies to reads and writes, even for commands such as "cat", "grep", "head", and "tail".
         |- A read-only command does not make a forbidden external path safe.
+        |- Apply any system-prompt allowance for incidental runtime bookkeeping.
+        |- That allowance does not authorize otherwise forbidden substantive filesystem changes.
         |- Executable lookup through "PATH", loading an executable, and loading its runtime or library dependencies are not project-data access. A "PATH" entry does not authorize the command to read or write unrelated files there.
         |- Pipelines and file-descriptor redirections such as "2>&1" move process output and do not write a filesystem path.
         |- Redirection to the exact path "/dev/null" discards output and is not a filesystem violation. No other path under "/dev" has this exception.
@@ -431,6 +442,7 @@ export const createPermissionEvaluator = (
   options: Options,
   resolveKey: Effect.Effect<string | undefined>,
   resolveAgentDefinition: AgentDefinitionResolver,
+  homeDirectory: string = homedir(),
 ) =>
   Effect.gen(function* () {
     const apiKey = yield* resolveKey
@@ -471,7 +483,7 @@ export const createPermissionEvaluator = (
           return
         }
         const requestBody = JSON.stringify(
-          buildRequest(classifiedEvent, options.model, policy, agentDefinition, projectDirectory),
+          buildRequest(classifiedEvent, options.model, policy, agentDefinition, projectDirectory, homeDirectory),
         )
 
         const result = yield* Cache.get(assessmentCache, requestBody).pipe(
