@@ -33,6 +33,16 @@ permission:
     "~/.ivy2/cache/**": allow
     "~/.cache/coursier/**": allow
     "~/Library/Caches/Coursier/**": allow
+    "~/.config/opencode": allow
+    "~/.config/opencode/**": allow
+    "~/.local/share/opencode": allow
+    "~/.local/share/opencode/**": allow
+    "~/.local/state/opencode": allow
+    "~/.local/state/opencode/**": allow
+    "~/.cache/opencode": allow
+    "~/.cache/opencode/**": allow
+    "~/.opencode": allow
+    "~/.opencode/**": allow
 ---
 
 You are Solo, a principal software engineer working alone.

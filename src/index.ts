@@ -182,19 +182,36 @@ export const permissionFromAssessment = (
 
 export const fallbackEffect = (fallback: FallbackEffect | undefined): PermissionEffect => fallback ?? "deny"
 
-const noulQuestion = (instructions: string, yes: string, no: string): NoulQuestion => ({
+const noulQuestion = (question: string, yes: string, no: string, rules: string = ""): NoulQuestion => ({
   type: "noul",
   instructions: [
     questionPrompt(`
-      |Read "state.agentDefinition" as JSON. Its "system" field is the agent's full system prompt; its other fields are the complete resolved agent configuration.
+      |# Agent definition
       |
-      |"state.policy.http" contains the agent's configured HTTP permissions.
-      |Evaluate "state.shellCommand" against the supplied agent's role, instructions, and permissions.
-      |Apply ordered permission rules with the last matching rule winning. "ask" requests this classification.
-      |"state.filesystemAccess" provides the project directory, home directory, and external-directory permissions for resolving paths and working-directory changes.
+      |You MUST read "state.agentDefinition" as JSON:
+      |- Its "system" field is the agent's full system prompt.
+      |- Its other fields are the complete resolved OpenCode v2 agent configuration (Agent.Info schema).
+      |
+      |# Settings
+      |
+      |- "state.policy.http": the agent's configured HTTP permissions.
+      |- "state.filesystemAccess": path-resolution settings:
+      |  - Project directory.
+      |  - Home directory.
+      |  - Ordered external-directory permissions.
+      |
+      |# Rules and restrictions
+      |
+      |Requirement keywords follow RFC 2119.
+      |
+      |- You MUST evaluate "state.shellCommand" against the supplied agent's role, instructions, and permissions.
+      |- You MUST apply ordered permission rules with the last matching rule winning.
+      |- You MUST treat "ask" as a request for this classification.
     `),
-    instructions,
-  ].join("\n\n"),
+    rules,
+    "# Question",
+    question,
+  ].filter((section) => section !== "").join("\n\n"),
   criteria: { true: yes, false: no },
 })
 
@@ -240,6 +257,18 @@ export const buildRequest = (
       "Do the command's filesystem effects violate the supplied agent's instructions or permissions?",
       "The command's filesystem effects violate the supplied agent's instructions or permissions.",
       "The command's filesystem effects comply with the supplied agent's instructions and permissions.",
+      questionPrompt(`
+        |- For path access, you MUST first evaluate "state.filesystemAccess.externalDirectoryRules":
+        |  - These are the ordered "external_directory" permissions extracted from "state.agentDefinition".
+        |  - You MUST match each accessed external path against them in order.
+        |  - You MUST use the last matching rule to determine access.
+        |  - You MUST classify access as a violation when the last matching rule is "deny", including read-only access.
+        |- The actual HOME directory is ${JSON.stringify(homeDirectory)}.
+        |  - You MUST resolve "~" in paths and permission patterns using this directory.
+        |  - This is a HOME path: ${JSON.stringify(`${homeDirectory}/documents/report.txt`)}.
+        |  - This is NOT a HOME path: "/home/other-user/documents/report.txt".
+        |- You MUST use the agent's system prompt to assess which operations are permitted on accessible paths.
+      `),
     ),
     remoteMutation: noulQuestion(
       "Do the command's remote effects violate the supplied agent's instructions or permissions?",

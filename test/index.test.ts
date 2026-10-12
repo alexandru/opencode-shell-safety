@@ -344,17 +344,33 @@ describe("Jev request", () => {
     })
     expect(request.state.policy.http.credentials["BRAVE_SEARCH_API_KEY"]).toEqual(["api.search.brave.com"])
     for (const question of Object.values(request.questions)) {
-      expect(question.instructions.startsWith('Read "state.agentDefinition"')).toBeTrue()
+      expect(question.instructions.startsWith("# Agent definition\n")).toBeTrue()
       expect(question.instructions).toContain("full system prompt")
       expect(question.instructions).toContain('"state.policy.http"')
       expect(question.instructions).toContain('"state.filesystemAccess"')
       expect(question.instructions).toContain("last matching rule winning")
+      expect(question.instructions).toContain("# Settings\n")
+      expect(question.instructions).toContain("# Rules and restrictions\n")
+      expect(question.instructions).toContain("Requirement keywords follow RFC 2119.")
+      expect(question.instructions).toContain("OpenCode v2 agent configuration (Agent.Info schema)")
+      expect(question.instructions).toContain('You MUST read "state.agentDefinition" as JSON')
+      expect(question.instructions).toContain('You MUST evaluate "state.shellCommand"')
+      expect(question.instructions).toContain("You MUST apply ordered permission rules with the last matching rule winning.")
+      expect(question.instructions).toContain('You MUST treat "ask" as a request for this classification.')
+      expect(question.instructions).toContain("# Question\n")
       expect(question.criteria.true).toContain("supplied agent's")
       expect(question.criteria.false).toContain("supplied agent's")
       expect(question.instructions.includes("|")).toBeFalse()
     }
     expect(request.questions.remoteMutation.criteria.true).toBe(
       "The command's remote effects violate the supplied agent's instructions or permissions.",
+    )
+    expect(request.questions.filesystemViolation.instructions).toContain('The actual HOME directory is "/home/dev".')
+    expect(request.questions.filesystemViolation.instructions).toContain(
+      'You MUST classify access as a violation when the last matching rule is "deny", including read-only access.',
+    )
+    expect(request.questions.filesystemViolation.instructions).toContain(
+      'This is a HOME path: "/home/dev/documents/report.txt".',
     )
   })
 
