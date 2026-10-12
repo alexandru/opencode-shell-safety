@@ -343,28 +343,19 @@ describe("Jev request", () => {
       ],
     })
     expect(request.state.policy.http.credentials["BRAVE_SEARCH_API_KEY"]).toEqual(["api.search.brave.com"])
-    expect(request.questions.withinPolicy.instructions).toContain("full system prompt")
-    expect(request.questions.withinPolicy.instructions).toContain(
-      "Work explicitly assigned by the full system prompt is within policy",
+    for (const question of Object.values(request.questions)) {
+      expect(question.instructions.startsWith('Read "state.agentDefinition"')).toBeTrue()
+      expect(question.instructions).toContain("full system prompt")
+      expect(question.instructions).toContain('"state.policy.http"')
+      expect(question.instructions).toContain('"state.filesystemAccess"')
+      expect(question.instructions).toContain("last matching rule winning")
+      expect(question.criteria.true).toContain("supplied agent's")
+      expect(question.criteria.false).toContain("supplied agent's")
+      expect(question.instructions.includes("|")).toBeFalse()
+    }
+    expect(request.questions.remoteMutation.criteria.true).toBe(
+      "The command's remote effects violate the supplied agent's instructions or permissions.",
     )
-    expect(request.questions.filesystemViolation.instructions).toContain(
-      'complete ordered list of external-directory rules',
-    )
-    expect(request.questions.filesystemViolation.instructions).toContain(
-      'This applies to reads and writes',
-    )
-    expect(request.questions.withinPolicy.instructions).toContain(
-      'Treat the exact path "/dev/null" as a shell output sink',
-    )
-    expect(request.questions.filesystemViolation.instructions).toContain(
-      'Redirection to the exact path "/dev/null" discards output',
-    )
-    expect(request.questions.filesystemViolation.instructions).toContain(
-      'Executable lookup through "PATH"',
-    )
-    expect(request.questions.withinPolicy.instructions.startsWith('Read "state.agentDefinition"')).toBeTrue()
-    expect(request.questions.withinPolicy.instructions).toContain("\nRules:\n- ")
-    expect(request.questions.withinPolicy.instructions.includes("|")).toBeFalse()
   })
 
   test("allows only high policy confidence with low violation probabilities", () => {

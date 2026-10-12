@@ -25,3 +25,13 @@ These rules apply to every file in this repository.
 - Do not weaken compiler or linter settings to make a check pass.
 - Exclude dependency declaration internals from compiler and linter checks. Type-check plugin code against dependencies' published declarations without modifying those dependencies.
 - Run the plugin's typecheck, unit tests, and integration tests before reporting completion.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues for `alexandru/opencode-shell-safety`. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` and `docs/adr/`. See `docs/agents/domain.md`.

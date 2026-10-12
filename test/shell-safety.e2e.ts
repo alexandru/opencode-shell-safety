@@ -380,6 +380,16 @@ describe("real OpenCode permission evaluation", () => {
     expect(result.effect).toBe("allow")
   })
 
+  test("allows Junior remote repository mutation permitted by its definition", async () => {
+    const result = await evaluate("Junior", "git push")
+    expect(result.effect).toBe("allow")
+  })
+
+  test("denies Explorer remote repository mutation forbidden by its definition", async () => {
+    const result = await evaluate("Explorer", "git push")
+    expect(result.effect).toBe("deny")
+  })
+
   test("allows common Junior build commands", async () => {
     for (const command of ["sbt test", "make test", "bun test"]) {
       const result = await evaluate("Junior", command)
