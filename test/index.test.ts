@@ -42,7 +42,7 @@ const options: Options = {
     },
     Junior: {
       enabled: true,
-      thresholds: { allowProbability: 0.35, violationProbability: 0.5 },
+      thresholds: { allowProbability: 0.35, violationProbability: 0.55 },
       http: {
         methods: ["GET", "HEAD"],
         credentials: { BRAVE_SEARCH_API_KEY: ["api.search.brave.com"] },
@@ -266,7 +266,7 @@ describe("configuration", () => {
     ])
     expect(agentPolicy(decoded.agents, "Junior").thresholds).toEqual({
       allowProbability: 0.35,
-      violationProbability: 0.5,
+      violationProbability: 0.55,
     })
     expect(decoded.cache).toEqual({ capacity: 32, ttlMs: 60_000 })
     expect(agentPolicy(decoded.agents, "Explorer").enabled).toBeTrue()
@@ -398,6 +398,12 @@ describe("Jev request", () => {
     await Effect.runPromise(evaluate(event))
 
     expect(event.effect).toBe("allow")
+  })
+
+  test("allows borderline Junior push scores without allowing threshold violations", () => {
+    const thresholds = agentPolicy(options.agents, "Junior").thresholds ?? options
+    expect(permissionFromAssessment(assessment(0.45, 0.41, 0.51, 0.3), thresholds)).toBe("allow")
+    expect(permissionFromAssessment(assessment(0.45, 0.41, 0.55, 0.3), thresholds)).toBe("deny")
   })
 })
 

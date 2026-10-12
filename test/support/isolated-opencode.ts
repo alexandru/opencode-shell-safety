@@ -53,7 +53,7 @@ const options = {
     },
     Junior: {
       enabled: true,
-      thresholds: { allowProbability: 0.35, violationProbability: 0.5 },
+      thresholds: { allowProbability: 0.35, violationProbability: 0.55 },
       http: {
         methods: ["GET", "HEAD"],
         credentials: { BRAVE_SEARCH_API_KEY: ["api.search.brave.com"] },
