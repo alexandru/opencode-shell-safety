@@ -182,6 +182,8 @@ permission:
     "~/.opencode/**": allow
   skill: allow
   webfetch: allow
+  websearch: allow
+  execute: deny
   question: allow
   "mcp*": allow
   task:

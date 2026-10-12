@@ -1,0 +1,9 @@
+# Source-command classification
+
+Classification MUST evaluate the complete command text of the shell invocation. Segments are never sent to the classifier.
+
+OpenCode delivers shell permission requests as scanner segments: one resource per command, some redirects excluded, and no joining operators. The join between two segments carries safety semantics. `cd <dir> && <cmd>` runs the command only in `<dir>`; `cd <dir>; <cmd>` also runs it in the previous working directory when the `cd` fails; `cd <dir> || <cmd>` runs it only there. Segment-only classification cannot recover these differences. It must judge by the union of reachable executions, which penalizes safe commands whose operators make their effects deterministic.
+
+The plugin therefore captures the complete command text at the tool boundary. The `tool.execute.before` hook provides the shell tool's raw `command`, stored by tool-call ID. A tool-originated permission evaluation carries the same ID in `source`, so classification joins the stored command to the evaluation. The request carries the complete command text and nothing derived from the scanner: segments are never sent, because a second representation of one command invites conflicting readings. The `tool.execute.after` hook discards the entry, also for failed calls. The capture handler MUST NOT fail, because a failing `execute.before` rejects the tool call.
+
+Classification without the complete command text is refused, never degraded. A permission evaluation that provides only multiple scanner segments — possible for direct permission API callers — cannot be classified and MUST receive the configured fallback effect. A single-segment evaluation is the complete text of a single command and is classified as such. Where OpenCode can carry the source command in permission event metadata, it SHOULD, and the plugin SHOULD consume it there instead of relying on tool-boundary capture.

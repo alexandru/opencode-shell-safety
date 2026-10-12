@@ -1,0 +1,21 @@
+{
+  "typescript": {
+    "semiColons": "asi"
+  },
+  "json": {},
+  "plugins": [
+    "npm:@dprint/typescript@0.96.1",
+    "npm:@dprint/json@0.25.2"
+  ],
+  "includes": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "package.json",
+    "tsconfig.json"
+  ],
+  "excludes": [
+    "**/node_modules",
+    "bun.lock",
+    ".test-runtime/**"
+  ]
+}

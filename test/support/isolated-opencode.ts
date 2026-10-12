@@ -1,7 +1,7 @@
+import { Schema } from "effect"
 import { copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Schema } from "effect"
 
 export type IsolatedOpenCode = {
   readonly project: string
@@ -254,10 +254,12 @@ export const startIsolatedOpenCode = async (projectName?: string): Promise<Isola
     let plugin: typeof PluginResponse.Type["data"][number] | undefined
     while (plugin === undefined && Date.now() < deadline) {
       try {
-        const decoded = Schema.decodeUnknownSync(Schema.fromJsonString(PluginResponse))(await request(
-          "GET",
-          `/api/plugin?location[directory]=${encodeURIComponent(project)}`,
-        ))
+        const decoded = Schema.decodeUnknownSync(Schema.fromJsonString(PluginResponse))(
+          await request(
+            "GET",
+            `/api/plugin?location[directory]=${encodeURIComponent(project)}`,
+          ),
+        )
         plugin = decoded.data.find((entry) => entry.id === "shell-safety")
       } catch {
         await sleep(100)

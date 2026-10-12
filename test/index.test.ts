@@ -1,20 +1,22 @@
-import { describe, expect, test } from "bun:test"
 import { Agent } from "@opencode/plugin/effect"
-import { Effect, Exit } from "effect"
+import { describe, expect, test } from "bun:test"
+import { Effect, Exit, Schema } from "effect"
 import {
+  type AgentPolicy,
   buildRequest,
   createPermissionEvaluator,
+  createSourceCommandStore,
   decodeOptions,
   encodeAgentDefinition,
-  permissionFromAssessment,
-  resolveApiKey,
-  resolveAgentDefinition,
-  type AgentPolicy,
   type Fetch,
   type Options,
   type PermissionEffect,
   type PermissionEvent,
+  permissionFromAssessment,
+  resolveAgentDefinition,
+  resolveApiKey,
   type SafetyAssessment,
+  ShellInputSchema,
 } from "../src/index"
 
 const options: Options = {
@@ -118,7 +120,11 @@ describe("configuration", () => {
     const key = await Effect.runPromise(resolveApiKey(
       decoded,
       (name) => Effect.succeed(name === "opencode" ? "integration-key" : undefined),
-      (name) => Effect.sync(() => { readNames.push(name); return "environment-key" }),
+      (name) =>
+        Effect.sync(() => {
+          readNames.push(name)
+          return "environment-key"
+        }),
     ))
     expect(key).toBe("integration-key")
     expect(readNames).toEqual([])
@@ -143,7 +149,11 @@ describe("configuration", () => {
     const integrationLookups: string[] = []
     const key = await Effect.runPromise(resolveApiKey(
       decoded,
-      (name) => Effect.sync(() => { integrationLookups.push(name); return "integration-key" }),
+      (name) =>
+        Effect.sync(() => {
+          integrationLookups.push(name)
+          return "integration-key"
+        }),
       (name) => Effect.succeed(name === "TYPESAFE_API_KEY" ? "typesafe-key" : undefined),
     ))
     expect(key).toBe("typesafe-key")
@@ -177,14 +187,15 @@ describe("configuration", () => {
       agents: { Librarian: { enabled: true } },
     })))
     const policy = agentPolicy(decoded.agents, "Librarian")
-    const request = buildRequest(
-      librarianEvent("list directory"),
-      decoded.model,
+    const request = buildRequest({
+      event: librarianEvent("list directory"),
+      model: decoded.model,
       policy,
       agentDefinition,
-      "/home/dev/project",
-      "/home/dev",
-    )
+      projectDirectory: "/home/dev/project",
+      homeDirectory: "/home/dev",
+      command: "list directory",
+    })
     expect(request.state.policy.http).toEqual({ methods: [], credentials: {} })
   })
 
@@ -223,7 +234,11 @@ describe("configuration", () => {
       resolveApiKey(
         { integration: "typesafe", apiKeyEnv: "TYPESAFE_API_KEY" },
         (name) => Effect.succeed(name === "typesafe" ? "integration-key" : undefined),
-        (name) => Effect.sync(() => { readNames.push(name); return "environment-key" }),
+        (name) =>
+          Effect.sync(() => {
+            readNames.push(name)
+            return "environment-key"
+          }),
       ),
     )
     expect(key).toBe("integration-key")
@@ -235,8 +250,16 @@ describe("configuration", () => {
     const key = await Effect.runPromise(
       resolveApiKey(
         { integration: "typesafe", apiKeyEnv: "OPENCODE_API_KEY" },
-        (name) => Effect.sync(() => { lookups.push(name); return undefined }),
-        (name) => Effect.sync(() => { lookups.push(name); return "environment-key" }),
+        (name) =>
+          Effect.sync(() => {
+            lookups.push(name)
+            return undefined
+          }),
+        (name) =>
+          Effect.sync(() => {
+            lookups.push(name)
+            return "environment-key"
+          }),
       ),
     )
     expect(key).toBe("environment-key")
@@ -248,8 +271,16 @@ describe("configuration", () => {
     const key = await Effect.runPromise(
       resolveApiKey(
         { integration: "custom", apiKeyEnv: "CUSTOM_API_TOKEN" },
-        (name) => Effect.sync(() => { lookups.push(name); return undefined }),
-        (name) => Effect.sync(() => { lookups.push(name); return "environment-key" }),
+        (name) =>
+          Effect.sync(() => {
+            lookups.push(name)
+            return undefined
+          }),
+        (name) =>
+          Effect.sync(() => {
+            lookups.push(name)
+            return "environment-key"
+          }),
       ),
     )
     expect(key).toBe("environment-key")
@@ -301,9 +332,9 @@ describe("agent definition", () => {
       ],
     })
 
-    expect(definition).toContain('"system":"Complete researcher prompt."')
-    expect(definition).toContain('"temperature":0.2')
-    expect(definition).toContain('"resource":"cellar *"')
+    expect(definition).toContain("\"system\":\"Complete researcher prompt.\"")
+    expect(definition).toContain("\"temperature\":0.2")
+    expect(definition).toContain("\"resource\":\"cellar *\"")
   })
 })
 
@@ -328,9 +359,17 @@ describe("Jev request", () => {
       effect: "ask",
     }
     const policy = agentPolicy(options.agents, "Librarian")
-    const request = buildRequest(event, options.model, policy, agentDefinition, "/home/dev/project", "/home/dev")
+    const request = buildRequest({
+      event,
+      model: options.model,
+      policy,
+      agentDefinition,
+      projectDirectory: "/home/dev/project",
+      homeDirectory: "/home/dev",
+      command: "cellar get-external org.typelevel:cats-effect_3:3.7.1 cats.effect.Resource",
+    })
 
-    expect(request.state.shellCommand).toEqual(event.resources)
+    expect(request.state.command).toBe("cellar get-external org.typelevel:cats-effect_3:3.7.1 cats.effect.Resource")
     expect(request.state.projectDirectory).toBe("/home/dev/project")
     expect(request.state.agentDefinition).toBe(agentDefinition.encoded)
     expect(request.state.filesystemAccess).toEqual({
@@ -346,17 +385,22 @@ describe("Jev request", () => {
     for (const question of Object.values(request.questions)) {
       expect(question.instructions.startsWith("# Agent definition\n")).toBeTrue()
       expect(question.instructions).toContain("full system prompt")
-      expect(question.instructions).toContain('"state.policy.http"')
-      expect(question.instructions).toContain('"state.filesystemAccess"')
+      expect(question.instructions).toContain("\"state.policy.http\"")
+      expect(question.instructions).toContain("\"state.filesystemAccess\"")
       expect(question.instructions).toContain("last matching rule winning")
       expect(question.instructions).toContain("# Settings\n")
       expect(question.instructions).toContain("# Rules and restrictions\n")
       expect(question.instructions).toContain("Requirement keywords follow RFC 2119.")
       expect(question.instructions).toContain("OpenCode v2 agent configuration (Agent.Info schema)")
-      expect(question.instructions).toContain('You MUST read "state.agentDefinition" as JSON')
-      expect(question.instructions).toContain('You MUST evaluate "state.shellCommand"')
-      expect(question.instructions).toContain("You MUST apply ordered permission rules with the last matching rule winning.")
-      expect(question.instructions).toContain('You MUST treat "ask" as a request for this classification.')
+      expect(question.instructions).toContain("You MUST read \"state.agentDefinition\" as JSON")
+      expect(question.instructions).toContain("You MUST evaluate the command against the supplied agent's role")
+      expect(question.instructions).toContain("\"state.command\" is the complete command text of the shell invocation")
+      expect(question.instructions).toContain("The initial working directory is \"state.projectDirectory\"")
+      expect(question.instructions).toContain("You MUST judge by the most restrictive reachable effect")
+      expect(question.instructions).toContain(
+        "You MUST apply ordered permission rules with the last matching rule winning.",
+      )
+      expect(question.instructions).toContain("You MUST treat \"ask\" as a request for this classification.")
       expect(question.instructions).toContain("# Question\n")
       expect(question.criteria.true).toContain("supplied agent's")
       expect(question.criteria.false).toContain("supplied agent's")
@@ -365,12 +409,12 @@ describe("Jev request", () => {
     expect(request.questions.remoteMutation.criteria.true).toBe(
       "The command's remote effects violate the supplied agent's instructions or permissions.",
     )
-    expect(request.questions.filesystemViolation.instructions).toContain('The actual HOME directory is "/home/dev".')
+    expect(request.questions.filesystemViolation.instructions).toContain("The actual HOME directory is \"/home/dev\".")
     expect(request.questions.filesystemViolation.instructions).toContain(
-      'You MUST classify access as a violation when the last matching rule is "deny", including read-only access.',
+      "You MUST classify access as a violation when the last matching rule is \"deny\", including read-only access.",
     )
     expect(request.questions.filesystemViolation.instructions).toContain(
-      'This is a HOME path: "/home/dev/documents/report.txt".',
+      "This is a HOME path: \"/home/dev/documents/report.txt\".",
     )
   })
 
@@ -404,6 +448,130 @@ describe("Jev request", () => {
     const thresholds = agentPolicy(options.agents, "Junior").thresholds ?? options
     expect(permissionFromAssessment(assessment(0.45, 0.41, 0.51, 0.3), thresholds)).toBe("allow")
     expect(permissionFromAssessment(assessment(0.45, 0.41, 0.55, 0.3), thresholds)).toBe("deny")
+  })
+})
+
+describe("source command capture", () => {
+  test("decodes shell input and ignores additional fields", async () => {
+    const decoded = await Effect.runPromise(
+      Schema.decodeUnknownEffect(ShellInputSchema)({ command: "grep pattern", timeout: 5 }),
+    )
+    expect(decoded.command).toBe("grep pattern")
+  })
+
+  test("rejects input without a command", async () => {
+    const result = await Effect.runPromiseExit(Schema.decodeUnknownEffect(ShellInputSchema)({ path: "/tmp" }))
+    expect(Exit.isFailure(result)).toBeTrue()
+  })
+
+  test("captures a source command per tool call and consumes it on read", async () => {
+    const store = await Effect.runPromise(createSourceCommandStore())
+    await Effect.runPromise(store.capture("call_1", "cd /repo && grep pattern | head -5"))
+    expect(await Effect.runPromise(store.take("call_1"))).toBe("cd /repo && grep pattern | head -5")
+    expect(await Effect.runPromise(store.take("call_1"))).toBeUndefined()
+  })
+
+  test("discards a source command without reading it", async () => {
+    const store = await Effect.runPromise(createSourceCommandStore())
+    await Effect.runPromise(store.capture("call_1", "grep pattern"))
+    await Effect.runPromise(store.discard("call_1"))
+    expect(await Effect.runPromise(store.take("call_1"))).toBeUndefined()
+  })
+
+  test("keeps source commands separate per tool call", async () => {
+    const store = await Effect.runPromise(createSourceCommandStore())
+    await Effect.runPromise(store.capture("call_1", "first"))
+    await Effect.runPromise(store.capture("call_2", "second"))
+    expect(await Effect.runPromise(store.take("call_2"))).toBe("second")
+    expect(await Effect.runPromise(store.take("call_1"))).toBe("first")
+  })
+
+  test("carries the complete command in the request state", () => {
+    const request = buildRequest({
+      event: librarianEvent("cd /repo && grep pattern"),
+      model: options.model,
+      policy: agentPolicy(options.agents, "Librarian"),
+      agentDefinition,
+      projectDirectory: "/home/dev/project",
+      homeDirectory: "/home/dev",
+      command: "cd /repo && grep pattern",
+    })
+    expect(request.state.command).toBe("cd /repo && grep pattern")
+  })
+
+  test("classifies a tool-originated request with its captured source command", async () => {
+    let requestBody = ""
+    const evaluate = await Effect.runPromise(
+      createPermissionEvaluator(
+        async (_input, init) => {
+          requestBody = typeof init?.body === "string" ? init.body : ""
+          return effectResponse(assessment(0.98, 0.01, 0.01, 0.01))
+        },
+        options,
+        Effect.succeed("test-key"),
+        () => Effect.succeed(agentDefinition),
+        "/home/dev",
+        (id) => Effect.succeed(id === "call_1" ? "cd /repo && grep pattern" : undefined),
+      ),
+    )
+    const event: PermissionEvent = {
+      sessionID: "session",
+      agent: "Librarian",
+      action: "shell",
+      resources: ["cd /repo", "grep pattern"],
+      effect: "ask",
+      source: { type: "tool", messageID: "msg_1", id: "call_1" },
+    }
+
+    await Effect.runPromise(evaluate(event, "/home/dev/project"))
+
+    expect(requestBody).toContain("\"command\":\"cd /repo && grep pattern\"")
+    expect(event.effect).toBe("allow")
+  })
+
+  test("classifies a single-resource command without a tool source", async () => {
+    let requestBody = ""
+    const evaluate = await Effect.runPromise(
+      createPermissionEvaluator(
+        async (_input, init) => {
+          requestBody = typeof init?.body === "string" ? init.body : ""
+          return effectResponse(assessment(0.98, 0.01, 0.01, 0.01))
+        },
+        options,
+        Effect.succeed("test-key"),
+        () => Effect.succeed(agentDefinition),
+      ),
+    )
+    const event = librarianEvent("cd /repo && grep pattern")
+
+    await Effect.runPromise(evaluate(event, "/home/dev/project"))
+
+    expect(requestBody).toContain("\"command\":\"cd /repo && grep pattern\"")
+  })
+
+  test("applies the fallback when only multiple segments are available", async () => {
+    let requests = 0
+    const evaluate = await Effect.runPromise(
+      createPermissionEvaluator(
+        async () => {
+          requests += 1
+          return effectResponse(assessment(0.98, 0.01, 0.01, 0.01))
+        },
+        options,
+        Effect.succeed("test-key"),
+        () => Effect.succeed(agentDefinition),
+      ),
+    )
+    const event: PermissionEvent = {
+      ...librarianEvent("cd /repo && grep pattern"),
+      resources: ["cd /repo", "grep pattern"],
+    }
+
+    await Effect.runPromise(evaluate(event, "/home/dev/project"))
+
+    expect(requests).toBe(0)
+    expect(event.effect).toBe("deny")
+    expect(event.message).toContain("complete command text is unavailable")
   })
 })
 
@@ -472,7 +640,7 @@ describe("permission hook", () => {
 
     await Effect.runPromise(evaluate(event, "/home/dev/session-project"))
 
-    expect(requestBody).toContain('"projectDirectory":"/home/dev/session-project"')
+    expect(requestBody).toContain("\"projectDirectory\":\"/home/dev/session-project\"")
     expect(event.effect).toBe("allow")
   })
 
@@ -584,7 +752,7 @@ describe("permission hook", () => {
       evaluator(async () => effectResponse(assessment(0.99, 0.01, 0.01, 0.01))),
     )
     const event = librarianEvent(
-      'curl -s "https://api.search.brave.com/res/v1/web/search" -H "X-Subscription-Token: ${BRAVE_SEARCH_API_KEY}"',
+      "curl -s \"https://api.search.brave.com/res/v1/web/search\" -H \"X-Subscription-Token: ${BRAVE_SEARCH_API_KEY}\"",
     )
 
     await Effect.runPromise(evaluate(event))

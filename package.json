@@ -1,7 +1,21 @@
 {
   "name": "opencode-shell-safety",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "OpenCode plugin that classifies shell permission requests against agent policy.",
+  "keywords": [
+    "opencode",
+    "plugin",
+    "shell",
+    "security"
+  ],
+  "homepage": "https://github.com/alexandru/opencode-shell-safety#readme",
+  "bugs": {
+    "url": "https://github.com/alexandru/opencode-shell-safety/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexandru/opencode-shell-safety.git"
+  },
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -13,7 +27,8 @@
     "README.md"
   ],
   "scripts": {
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && dprint check",
+    "fmt": "dprint fmt",
     "test": "bun test test/index.test.ts",
     "test:e2e": "bun test ./test/shell-safety.e2e.ts --timeout 120000",
     "prepublishOnly": "bun run check && bun run test"
@@ -25,22 +40,9 @@
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@types/json-schema": "7.0.15",
+    "dprint": "0.63.0",
     "typescript": "7.0.2"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/alexandru/opencode-shell-safety.git"
-  },
-  "bugs": {
-    "url": "https://github.com/alexandru/opencode-shell-safety/issues"
-  },
-  "homepage": "https://github.com/alexandru/opencode-shell-safety#readme",
-  "keywords": [
-    "opencode",
-    "plugin",
-    "shell",
-    "security"
-  ],
   "engines": {
     "bun": ">=1.4.2"
   }

@@ -17,11 +17,12 @@ These rules apply to every file in this repository.
 - Do not bypass diagnostics with `@ts-ignore`, `@ts-expect-error`, disabled lint rules, ambient declaration shims, broad index signatures, or similar workarounds.
 - Fix the type or API that caused a diagnostic. Do not hide the diagnostic.
 
-## Compiler and linting
+## Compiler, linting, and formatting
 
 - Use TypeScript strict mode.
 - Enable all applicable compiler checks, including unused code, implicit returns, unchecked indexed access, exact optional properties, switch fallthrough, and override checks.
 - Treat every compiler and linter warning as an error.
+- Format with `bun run fmt`; `bun run check` enforces `dprint` formatting.
 - Do not weaken compiler or linter settings to make a check pass.
 - Exclude dependency declaration internals from compiler and linter checks. Type-check plugin code against dependencies' published declarations without modifying those dependencies.
 - Run the plugin's typecheck, unit tests, and integration tests before reporting completion.

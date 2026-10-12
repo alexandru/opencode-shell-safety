@@ -1,14 +1,33 @@
 import { Agent, Plugin } from "@opencode/plugin/effect"
+import {
+  Cache,
+  Config,
+  Effect,
+  Exit,
+  HashMap,
+  Option,
+  Redacted,
+  Ref,
+  Schedule,
+  Schema,
+  String as EffectString,
+} from "effect"
 import { homedir } from "node:os"
-import { Cache, Config, Effect, Exit, Redacted, Schedule, Schema, String as EffectString } from "effect"
 
 export type PermissionEffect = "allow" | "ask" | "deny"
+
+export type PermissionSource = {
+  readonly type: "tool"
+  readonly messageID: string
+  readonly id: string
+}
 
 export type PermissionEvent = {
   readonly sessionID: string
   readonly agent?: string
   readonly action: string
   readonly resources: ReadonlyArray<string>
+  readonly source?: PermissionSource
   effect: PermissionEffect
   message?: string
 }
@@ -136,7 +155,7 @@ type SystemOneRequest = {
     readonly agent: string
     readonly action: string
     readonly projectDirectory: string
-    readonly shellCommand: ReadonlyArray<string>
+    readonly command: string
     readonly agentDefinition: string
     readonly filesystemAccess: {
       readonly projectDirectory: string
@@ -173,10 +192,9 @@ export const permissionFromAssessment = (
   assessment: SafetyAssessment,
   thresholds: Thresholds,
 ): ClassificationVerdict => {
-  const hasViolation =
-    assessment.filesystemViolation.noul >= thresholds.violationProbability ||
-    assessment.remoteMutation.noul >= thresholds.violationProbability ||
-    assessment.credentialViolation.noul >= thresholds.violationProbability
+  const hasViolation = assessment.filesystemViolation.noul >= thresholds.violationProbability
+    || assessment.remoteMutation.noul >= thresholds.violationProbability
+    || assessment.credentialViolation.noul >= thresholds.violationProbability
   return assessment.withinPolicy.noul >= thresholds.allowProbability && !hasViolation ? "allow" : "deny"
 }
 
@@ -204,7 +222,10 @@ const noulQuestion = (question: string, yes: string, no: string, rules: string =
       |
       |Requirement keywords follow RFC 2119.
       |
-      |- You MUST evaluate "state.shellCommand" against the supplied agent's role, instructions, and permissions.
+      |- You MUST evaluate the command against the supplied agent's role, instructions, and permissions.
+      |- "state.command" is the complete command text of the shell invocation.
+      |- The initial working directory is "state.projectDirectory".
+      |- You MUST judge by the most restrictive reachable effect: any reachable violation is a violation, and the command complies only when every reachable execution complies.
       |- You MUST apply ordered permission rules with the last matching rule winning.
       |- You MUST treat "ask" as a request for this classification.
     `),
@@ -225,20 +246,29 @@ const responseBody = (response: Response): Effect.Effect<string, JevNetworkError
   })
 }
 
-export const buildRequest = (
-  event: PermissionEvent & { readonly agent: string },
-  model: string,
-  policy: AgentPolicy,
-  agentDefinition: ResolvedAgentDefinition,
-  projectDirectory: string,
-  homeDirectory: string,
-): SystemOneRequest => ({
+export const buildRequest = ({
+  event,
+  model,
+  policy,
+  agentDefinition,
+  projectDirectory,
+  homeDirectory,
+  command,
+}: {
+  readonly event: PermissionEvent & { readonly agent: string }
+  readonly model: string
+  readonly policy: AgentPolicy
+  readonly agentDefinition: ResolvedAgentDefinition
+  readonly projectDirectory: string
+  readonly homeDirectory: string
+  readonly command: string
+}): SystemOneRequest => ({
   model,
   state: {
     agent: event.agent,
     action: event.action,
     projectDirectory,
-    shellCommand: event.resources,
+    command,
     agentDefinition: agentDefinition.encoded,
     filesystemAccess: {
       projectDirectory,
@@ -289,7 +319,7 @@ const requestAssessment = (
   requestBody: string,
   apiKey: string,
 ): Effect.Effect<SafetyAssessment, JevRequestError> => {
-  const attempt = Effect.gen(function* () {
+  const attempt = Effect.gen(function*() {
     const response = yield* Effect.tryPromise({
       try: (signal) =>
         fetch(options.endpoint, {
@@ -337,13 +367,14 @@ const isRetryable = (error: JevRequestError): boolean => {
   }
 }
 
-const environmentApiKey = (name: string) => Effect.gen(function* () {
-  const apiKey = yield* Config.redacted(name)
-  return Redacted.value(apiKey)
-}).pipe(Effect.catch(() => Effect.succeed(undefined)))
+const environmentApiKey = (name: string) =>
+  Effect.gen(function*() {
+    const apiKey = yield* Config.redacted(name)
+    return Redacted.value(apiKey)
+  }).pipe(Effect.catch(() => Effect.succeed(undefined)))
 
 const credentialApiKey = (ctx: Plugin.Context, integration: string) =>
-  Effect.gen(function* () {
+  Effect.gen(function*() {
     const connection = yield* ctx.integration.connection.active(integration)
     if (!connection) return undefined
     const credential = yield* ctx.integration.connection.resolve(connection)
@@ -357,7 +388,7 @@ export const resolveApiKey = (
   integrationKey: (integration: string) => Effect.Effect<string | undefined>,
   environmentKey: (name: string) => Effect.Effect<string | undefined>,
 ): Effect.Effect<string | undefined> =>
-  Effect.gen(function* () {
+  Effect.gen(function*() {
     if (options.integration) {
       const key = yield* integrationKey(options.integration)
       if (key) return key
@@ -365,12 +396,11 @@ export const resolveApiKey = (
     return options.apiKeyEnv ? yield* environmentKey(options.apiKeyEnv) : undefined
   })
 
-const agentDefinitionResolver = (ctx: Plugin.Context): AgentDefinitionResolver =>
-  (agent) =>
-    Effect.gen(function* () {
-      const result = yield* ctx.agent.get({ agentID: Agent.ID.make(agent) })
-      return resolveAgentDefinition(result.data)
-    }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+const agentDefinitionResolver = (ctx: Plugin.Context): AgentDefinitionResolver => (agent) =>
+  Effect.gen(function*() {
+    const result = yield* ctx.agent.get({ agentID: Agent.ID.make(agent) })
+    return resolveAgentDefinition(result.data)
+  }).pipe(Effect.catch(() => Effect.succeed(undefined)))
 
 const findPolicy = (options: Options, agent: string): AgentPolicy | undefined => {
   const target = agent.toLowerCase()
@@ -380,13 +410,40 @@ const findPolicy = (options: Options, agent: string): AgentPolicy | undefined =>
 const hasShellControlSyntax = (resources: ReadonlyArray<string>): boolean =>
   resources.some((resource) => /[;&|<>`$]/.test(resource))
 
+const resolveCommandText = (captured: string | undefined, resources: ReadonlyArray<string>): string | undefined =>
+  captured !== undefined ? captured : resources.length === 1 ? resources[0] : undefined
+
+export const ShellInputSchema = Schema.Struct({ command: Schema.String })
+
+const decodeShellInput = Schema.decodeUnknownEffect(ShellInputSchema)
+
+export type SourceCommandStore = {
+  readonly capture: (id: string, command: string) => Effect.Effect<void>
+  readonly discard: (id: string) => Effect.Effect<void>
+  readonly take: (id: string) => Effect.Effect<string | undefined>
+}
+
+export const createSourceCommandStore = (): Effect.Effect<SourceCommandStore> =>
+  Effect.gen(function*() {
+    const commands = yield* Ref.make(HashMap.empty<string, string>())
+    return {
+      capture: (id, command) => Ref.update(commands, (map) => HashMap.set(map, id, command)),
+      discard: (id) => Ref.update(commands, (map) => HashMap.remove(map, id)),
+      take: (id) =>
+        Effect.gen(function*() {
+          const command = HashMap.get(yield* Ref.get(commands), id)
+          if (Option.isSome(command)) yield* Ref.update(commands, (map) => HashMap.remove(map, id))
+          return Option.getOrUndefined(command)
+        }),
+    }
+  })
+
 const summary = (assessment: SafetyAssessment, verdict: ClassificationVerdict, effect: PermissionEffect): string => {
-  const classification =
-    `Jev shell classification: ${verdict} (` +
-    `withinPolicy=${assessment.withinPolicy.noul.toFixed(3)}, ` +
-    `filesystemViolation=${assessment.filesystemViolation.noul.toFixed(3)}, ` +
-    `remoteMutation=${assessment.remoteMutation.noul.toFixed(3)}, ` +
-    `credentialViolation=${assessment.credentialViolation.noul.toFixed(3)})`
+  const classification = `Jev shell classification: ${verdict} (`
+    + `withinPolicy=${assessment.withinPolicy.noul.toFixed(3)}, `
+    + `filesystemViolation=${assessment.filesystemViolation.noul.toFixed(3)}, `
+    + `remoteMutation=${assessment.remoteMutation.noul.toFixed(3)}, `
+    + `credentialViolation=${assessment.credentialViolation.noul.toFixed(3)})`
   if (verdict === "allow") return classification
   return effect === "deny"
     ? `${classification}. Rewrite the command to comply with your system prompt and permissions, or report the limitation if no compliant form exists.`
@@ -418,17 +475,18 @@ export const createPermissionEvaluator = (
   resolveKey: Effect.Effect<string | undefined>,
   resolveAgentDefinition: AgentDefinitionResolver,
   homeDirectory: string = homedir(),
+  takeSourceCommand: (id: string) => Effect.Effect<string | undefined> = () => Effect.succeed(undefined),
 ) =>
-  Effect.gen(function* () {
+  Effect.gen(function*() {
     const apiKey = yield* resolveKey
     const assessmentCache = apiKey
       ? yield* Cache.makeWith(
-          (requestBody: string) => requestAssessment(fetch, options, requestBody, apiKey),
-          {
-            capacity: options.cache.capacity,
-            timeToLive: (exit) => (Exit.isSuccess(exit) ? `${options.cache.ttlMs} millis` : 0),
-          },
-        )
+        (requestBody: string) => requestAssessment(fetch, options, requestBody, apiKey),
+        {
+          capacity: options.cache.capacity,
+          timeToLive: (exit) => (Exit.isSuccess(exit) ? `${options.cache.ttlMs} millis` : 0),
+        },
+      )
       : undefined
 
     return (event: PermissionEvent, projectDirectory?: string): Effect.Effect<void> => {
@@ -440,7 +498,7 @@ export const createPermissionEvaluator = (
       const classifiedEvent = { ...event, agent }
       const fallback = fallbackEffect(policy.fallback)
 
-      return Effect.gen(function* () {
+      return Effect.gen(function*() {
         if (!projectDirectory) {
           event.effect = fallback
           event.message = "Jev could not classify this command because the session directory is unavailable."
@@ -457,8 +515,24 @@ export const createPermissionEvaluator = (
           event.message = `Jev could not classify this command because the resolved ${agent} definition is unavailable.`
           return
         }
+        const source = event.source
+        const captured = source?.type === "tool" ? yield* takeSourceCommand(source.id) : undefined
+        const command = resolveCommandText(captured, event.resources)
+        if (command === undefined) {
+          event.effect = fallback
+          event.message = "Jev could not classify this command because the complete command text is unavailable."
+          return
+        }
         const requestBody = JSON.stringify(
-          buildRequest(classifiedEvent, options.model, policy, agentDefinition, projectDirectory, homeDirectory),
+          buildRequest({
+            event: classifiedEvent,
+            model: options.model,
+            policy,
+            agentDefinition,
+            projectDirectory,
+            homeDirectory,
+            command,
+          }),
         )
 
         const result = yield* Cache.get(assessmentCache, requestBody).pipe(
@@ -482,22 +556,36 @@ export const createPlugin = (fetch: Fetch = globalThis.fetch) =>
   Plugin.define({
     id: "shell-safety",
     effect: (ctx) =>
-      Effect.gen(function* () {
+      Effect.gen(function*() {
         const options = yield* decodeOptions(JSON.stringify(ctx.options)).pipe(Effect.orDie)
+        const sourceCommands = yield* createSourceCommandStore()
+        yield* ctx.tool.hook("execute.before", (event) =>
+          decodeShellInput(event.input).pipe(
+            Effect.map((input) => input.command),
+            Effect.option,
+            Effect.flatMap((command) =>
+              Option.match(command, {
+                onNone: () => Effect.void,
+                onSome: (value) => sourceCommands.capture(event.id, value),
+              })
+            ),
+          ))
+        yield* ctx.tool.hook("execute.after", (event) => sourceCommands.discard(event.id))
         const evaluate = yield* createPermissionEvaluator(
           fetch,
           options,
           resolveApiKey(options, (integration) => credentialApiKey(ctx, integration), environmentApiKey),
           agentDefinitionResolver(ctx),
+          homedir(),
+          sourceCommands.take,
         )
         yield* ctx.permission.hook("evaluate", (event) =>
-          Effect.gen(function* () {
+          Effect.gen(function*() {
             const session = yield* ctx.session
               .get({ sessionID: event.sessionID })
               .pipe(Effect.catch(() => Effect.succeed(undefined)))
             yield* evaluate(event, session?.location.directory)
-          }),
-        )
+          }))
       }),
   })
 
