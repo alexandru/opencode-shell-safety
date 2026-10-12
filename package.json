@@ -1,6 +1,6 @@
 {
   "name": "opencode-shell-safety",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "OpenCode plugin that classifies shell permission requests against agent policy.",
   "license": "MIT",
   "type": "module",
