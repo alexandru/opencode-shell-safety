@@ -573,6 +573,73 @@ describe("source command capture", () => {
     expect(event.effect).toBe("deny")
     expect(event.message).toContain("complete command text is unavailable")
   })
+
+  test("classifies the captured complete command for an incoming allowed tool request", async () => {
+    const scannerResource = "cellar get-external org.typelevel::cats-effect:3.7.0"
+    const capturedCommand = `${scannerResource} > /home/dev/project/unauthorized.txt`
+    let requests = 0
+    let requestBody = ""
+    const evaluate = await Effect.runPromise(
+      createPermissionEvaluator(
+        async (_input, init) => {
+          requests += 1
+          requestBody = typeof init?.body === "string" ? init.body : ""
+          return effectResponse(assessment(0.1, 0.99, 0, 0))
+        },
+        options,
+        Effect.succeed("test-key"),
+        () => Effect.succeed(agentDefinition),
+        "/home/dev",
+        (id) => Effect.succeed(id === "call-test" ? capturedCommand : undefined),
+      ),
+    )
+    const event: PermissionEvent = {
+      sessionID: "session",
+      agent: "Librarian",
+      action: "shell",
+      resources: [scannerResource],
+      effect: "allow",
+      source: { type: "tool", messageID: "message-test", id: "call-test" },
+    }
+
+    await Effect.runPromise(evaluate(event, "/home/dev/project"))
+
+    expect(requests).toBe(1)
+    expect(requestBody).toContain(`"command":${JSON.stringify(capturedCommand)}`)
+    expect(requestBody).not.toContain(`"command":${JSON.stringify(scannerResource)}`)
+    expect(event.effect).toBe("deny")
+  })
+
+  test("denies an incoming allowed tool request whose complete command is unavailable", async () => {
+    let requests = 0
+    const evaluate = await Effect.runPromise(
+      createPermissionEvaluator(
+        async () => {
+          requests += 1
+          return effectResponse(assessment(0.98, 0.01, 0.01, 0.01))
+        },
+        options,
+        Effect.succeed("test-key"),
+        () => Effect.succeed(agentDefinition),
+        "/home/dev",
+        () => Effect.succeed(undefined),
+      ),
+    )
+    const event: PermissionEvent = {
+      sessionID: "session",
+      agent: "Librarian",
+      action: "shell",
+      resources: ["cellar get-external org.typelevel::cats-effect:3.7.0"],
+      effect: "allow",
+      source: { type: "tool", messageID: "message-test", id: "call-test" },
+    }
+
+    await Effect.runPromise(evaluate(event, "/home/dev/project"))
+
+    expect(requests).toBe(0)
+    expect(event.effect).toBe("deny")
+    expect(event.message).toContain("complete command text is unavailable")
+  })
 })
 
 describe("permission hook", () => {

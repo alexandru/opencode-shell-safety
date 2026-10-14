@@ -407,11 +407,17 @@ const findPolicy = (options: Options, agent: string): AgentPolicy | undefined =>
   return Object.entries(options.agents).find(([name]) => name.toLowerCase() === target)?.[1]
 }
 
-const hasShellControlSyntax = (resources: ReadonlyArray<string>): boolean =>
-  resources.some((resource) => /[;&|<>`$]/.test(resource))
+const hasShellControlSyntax = (command: string): boolean => /[;&|<>`$]/.test(command)
 
-const resolveCommandText = (captured: string | undefined, resources: ReadonlyArray<string>): string | undefined =>
-  captured !== undefined ? captured : resources.length === 1 ? resources[0] : undefined
+const resolveCommandText = (
+  captured: string | undefined,
+  resources: ReadonlyArray<string>,
+  hasToolSource: boolean,
+): string | undefined => {
+  if (captured !== undefined) return captured
+  if (hasToolSource) return undefined
+  return resources.length === 1 ? resources[0] : undefined
+}
 
 export const ShellInputSchema = Schema.Struct({ command: Schema.String })
 
@@ -492,13 +498,21 @@ export const createPermissionEvaluator = (
     return (event: PermissionEvent, projectDirectory?: string): Effect.Effect<void> => {
       const agent = event.agent
       if (event.action !== "shell" || !agent || event.effect === "deny") return Effect.void
-      if (event.effect === "allow" && !hasShellControlSyntax(event.resources)) return Effect.void
       const policy = findPolicy(options, agent)
       if (!policy?.enabled) return Effect.void
       const classifiedEvent = { ...event, agent }
       const fallback = fallbackEffect(policy.fallback)
 
       return Effect.gen(function*() {
+        const source = event.source
+        const captured = source?.type === "tool" ? yield* takeSourceCommand(source.id) : undefined
+        const command = resolveCommandText(captured, event.resources, source !== undefined)
+        if (command === undefined) {
+          event.effect = fallback
+          event.message = "Jev could not classify this command because the complete command text is unavailable."
+          return
+        }
+        if (event.effect === "allow" && !hasShellControlSyntax(command)) return
         if (!projectDirectory) {
           event.effect = fallback
           event.message = "Jev could not classify this command because the session directory is unavailable."
@@ -513,14 +527,6 @@ export const createPermissionEvaluator = (
         if (!agentDefinition) {
           event.effect = fallback
           event.message = `Jev could not classify this command because the resolved ${agent} definition is unavailable.`
-          return
-        }
-        const source = event.source
-        const captured = source?.type === "tool" ? yield* takeSourceCommand(source.id) : undefined
-        const command = resolveCommandText(captured, event.resources)
-        if (command === undefined) {
-          event.effect = fallback
-          event.message = "Jev could not classify this command because the complete command text is unavailable."
           return
         }
         const requestBody = JSON.stringify(
