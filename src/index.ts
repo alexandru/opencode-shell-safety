@@ -55,9 +55,19 @@ const ThresholdsSchema = Schema.Struct({
 
 const FallbackEffectSchema = Schema.Literals(["ask", "deny"])
 
+const HttpCredentialSchema = Schema.Union([
+  Schema.Array(Schema.String),
+  Schema.Struct({
+    hosts: Schema.Array(Schema.String),
+    scheme: Schema.Literal("https"),
+    header: Schema.String,
+    disclosure: Schema.Literal("deny"),
+  }),
+])
+
 const HttpPolicySchema = Schema.Struct({
   methods: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
-  credentials: Schema.Record(Schema.String, Schema.Array(Schema.String))
+  credentials: Schema.Record(Schema.String, HttpCredentialSchema)
     .pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
 })
 
@@ -65,6 +75,7 @@ const AgentPolicySchema = Schema.Struct({
   enabled: Schema.Boolean,
   fallback: Schema.optionalKey(FallbackEffectSchema),
   thresholds: Schema.optionalKey(ThresholdsSchema),
+  allowed_tools: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   http: HttpPolicySchema.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ methods: [], credentials: {} }))),
 })
 
@@ -186,6 +197,9 @@ export const resolveAgentDefinition = (agent: Agent.Info): ResolvedAgentDefiniti
     .map((rule) => ({ resource: rule.resource, effect: rule.effect })),
 })
 
+const resolveHome = (resource: string, homeDirectory: string): string =>
+  resource.startsWith("~") ? `${homeDirectory}${resource.slice(1)}` : resource
+
 export type ClassificationVerdict = "allow" | "deny"
 
 export const permissionFromAssessment = (
@@ -213,6 +227,9 @@ const noulQuestion = (question: string, yes: string, no: string, rules: string =
       |# Settings
       |
       |- "state.policy.http": the agent's configured HTTP permissions.
+      |- "state.policy.allowed_tools": tools the configuration explicitly sanctions for this agent, including non-standard tools you do not otherwise recognize.
+      |- The "allowed_tools" list is not exhaustive: a tool absent from the list is still judged against the agent's role, instructions, and permissions.
+      |- An invocation of a listed tool is within policy unless its specific usage violates the agent's role, instructions, permissions, or HTTP policy.
       |- "state.filesystemAccess": path-resolution settings:
       |  - Project directory.
       |  - Home directory.
@@ -273,7 +290,10 @@ export const buildRequest = ({
     filesystemAccess: {
       projectDirectory,
       homeDirectory,
-      externalDirectoryRules: agentDefinition.externalDirectoryRules,
+      externalDirectoryRules: agentDefinition.externalDirectoryRules.map((rule) => ({
+        ...rule,
+        resource: resolveHome(rule.resource, homeDirectory),
+      })),
     },
     policy,
   },
@@ -289,7 +309,7 @@ export const buildRequest = ({
       "The command's filesystem effects comply with the supplied agent's instructions and permissions.",
       questionPrompt(`
         |- For path access, you MUST first evaluate "state.filesystemAccess.externalDirectoryRules":
-        |  - These are the ordered "external_directory" permissions extracted from "state.agentDefinition".
+        |  - These are the ordered "external_directory" permissions extracted from "state.agentDefinition", with "~" already resolved against the actual HOME directory.
         |  - You MUST match each accessed external path against them in order.
         |  - You MUST use the last matching rule to determine access.
         |  - You MUST classify access as a violation when the last matching rule is "deny", including read-only access.
@@ -297,7 +317,9 @@ export const buildRequest = ({
         |  - You MUST resolve "~" in paths and permission patterns using this directory.
         |  - This is a HOME path: ${JSON.stringify(`${homeDirectory}/documents/report.txt`)}.
         |  - This is NOT a HOME path: "/home/other-user/documents/report.txt".
+        |  - A path under another user's home directory never matches a "~" pattern, even when its structure resembles the actual HOME directory.
         |- You MUST use the agent's system prompt to assess which operations are permitted on accessible paths.
+        |- You MUST evaluate output redirection and output-file targets ("&>", ">", ">>", "-o", "--output", "--output-file", "-O", "--out-file") as written paths under the same rules, independently of the compliance of the main command.
       `),
     ),
     remoteMutation: noulQuestion(
@@ -309,6 +331,11 @@ export const buildRequest = ({
       "Does the command's credential handling violate the supplied agent's instructions or permissions?",
       "The command's credential handling violates the supplied agent's instructions or permissions.",
       "The command's credential handling complies with the supplied agent's instructions and permissions.",
+      questionPrompt(`
+        |- You MUST treat printing, echoing, or exporting a credential value as disclosure.
+        |- You MUST treat tracing a credential-bearing request (for example "curl -v" or "curl --trace") as disclosure when the policy denies disclosure.
+        |- You MUST treat a credential appearing outside its configured header, such as in a URL, query string, or request body, as a violation when the policy configures a header for that credential.
+      `),
     ),
   },
 })
@@ -406,8 +433,6 @@ const findPolicy = (options: Options, agent: string): AgentPolicy | undefined =>
   const target = agent.toLowerCase()
   return Object.entries(options.agents).find(([name]) => name.toLowerCase() === target)?.[1]
 }
-
-const hasShellControlSyntax = (command: string): boolean => /[;&|<>`$]/.test(command)
 
 const resolveCommandText = (
   captured: string | undefined,
@@ -512,7 +537,6 @@ export const createPermissionEvaluator = (
           event.message = "Jev could not classify this command because the complete command text is unavailable."
           return
         }
-        if (event.effect === "allow" && !hasShellControlSyntax(command)) return
         if (!projectDirectory) {
           event.effect = fallback
           event.message = "Jev could not classify this command because the session directory is unavailable."

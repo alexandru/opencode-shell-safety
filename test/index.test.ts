@@ -24,27 +24,44 @@ const options: Options = {
   model: "jev-1.13",
   integration: "opencode",
   apiKeyEnv: "OPENCODE_API_KEY",
-  allowProbability: 0.45,
-  violationProbability: 0.4,
+  allowProbability: 0.35,
+  violationProbability: 0.5,
   timeoutMs: 8_000,
   maxAttempts: 2,
   retryDelayMs: 1,
   cache: { capacity: 32, ttlMs: 60_000 },
   agents: {
+    Analyst: {
+      enabled: true,
+      thresholds: { allowProbability: 0.35, violationProbability: 0.55 },
+      allowed_tools: [],
+      http: { methods: [], credentials: {} },
+    },
     Explorer: {
       enabled: true,
+      allowed_tools: ["cellar"],
       http: { methods: [], credentials: {} },
     },
     Librarian: {
       enabled: true,
+      allowed_tools: ["cellar", "gh", "az", "curl"],
       http: {
         methods: ["GET", "HEAD"],
-        credentials: { BRAVE_SEARCH_API_KEY: ["api.search.brave.com"] },
+        credentials: {
+          BRAVE_SEARCH_API_KEY: ["api.search.brave.com"],
+          OS_TK: {
+            hosts: ["orangesharing.com"],
+            scheme: "https",
+            header: "Authorization",
+            disclosure: "deny",
+          },
+        },
       },
     },
     Junior: {
       enabled: true,
       thresholds: { allowProbability: 0.35, violationProbability: 0.55 },
+      allowed_tools: [],
       http: {
         methods: ["GET", "HEAD"],
         credentials: { BRAVE_SEARCH_API_KEY: ["api.search.brave.com"] },
@@ -217,6 +234,128 @@ describe("configuration", () => {
     })
   })
 
+  test("keeps accepting legacy credential host arrays", async () => {
+    const decoded = await Effect.runPromise(decodeOptions(JSON.stringify({
+      ...options,
+      agents: {
+        Librarian: {
+          enabled: true,
+          http: { methods: ["GET"], credentials: { SERVICE_KEY: ["api.example.com"] } },
+        },
+      },
+    })))
+    expect(agentPolicy(decoded.agents, "Librarian").http.credentials["SERVICE_KEY"]).toEqual(["api.example.com"])
+  })
+
+  test("decodes structured credential policies", async () => {
+    const decoded = await Effect.runPromise(decodeOptions(JSON.stringify({
+      ...options,
+      agents: {
+        Librarian: {
+          enabled: true,
+          http: {
+            methods: ["GET"],
+            credentials: {
+              OS_TK: {
+                hosts: ["orangesharing.com"],
+                scheme: "https",
+                header: "Authorization",
+                disclosure: "deny",
+              },
+            },
+          },
+        },
+      },
+    })))
+    expect(agentPolicy(decoded.agents, "Librarian").http.credentials["OS_TK"]).toEqual({
+      hosts: ["orangesharing.com"],
+      scheme: "https",
+      header: "Authorization",
+      disclosure: "deny",
+    })
+  })
+
+  test("rejects incomplete and invalid structured credential policies", async () => {
+    const missingHeader = await Effect.runPromiseExit(decodeOptions(JSON.stringify({
+      ...options,
+      agents: {
+        Librarian: {
+          enabled: true,
+          http: {
+            credentials: {
+              OS_TK: { hosts: ["orangesharing.com"], scheme: "https", disclosure: "deny" },
+            },
+          },
+        },
+      },
+    })))
+    const insecureScheme = await Effect.runPromiseExit(decodeOptions(JSON.stringify({
+      ...options,
+      agents: {
+        Librarian: {
+          enabled: true,
+          http: {
+            credentials: {
+              OS_TK: { hosts: ["orangesharing.com"], scheme: "http", header: "Authorization", disclosure: "deny" },
+            },
+          },
+        },
+      },
+    })))
+    const allowedDisclosure = await Effect.runPromiseExit(decodeOptions(JSON.stringify({
+      ...options,
+      agents: {
+        Librarian: {
+          enabled: true,
+          http: {
+            credentials: {
+              OS_TK: { hosts: ["orangesharing.com"], scheme: "https", header: "Authorization", disclosure: "allow" },
+            },
+          },
+        },
+      },
+    })))
+    expect(Exit.isFailure(missingHeader)).toBeTrue()
+    expect(Exit.isFailure(insecureScheme)).toBeTrue()
+    expect(Exit.isFailure(allowedDisclosure)).toBeTrue()
+  })
+
+  test("fills in an empty allowed_tools array by default", async () => {
+    const decoded = await Effect.runPromise(
+      decodeOptions(JSON.stringify({
+        ...options,
+        agents: {
+          Explorer: { enabled: true, http: { methods: [], credentials: {} } },
+        },
+      })),
+    )
+    expect(agentPolicy(decoded.agents, "Explorer").allowed_tools).toEqual([])
+  })
+
+  test("decodes configured allowed_tools", async () => {
+    const decoded = await Effect.runPromise(
+      decodeOptions(JSON.stringify({
+        ...options,
+        agents: {
+          Explorer: { enabled: true, allowed_tools: ["cellar"], http: { methods: [], credentials: {} } },
+        },
+      })),
+    )
+    expect(agentPolicy(decoded.agents, "Explorer").allowed_tools).toEqual(["cellar"])
+  })
+
+  test("rejects non-string allowed_tools entries", async () => {
+    const exit = await Effect.runPromiseExit(
+      decodeOptions(JSON.stringify({
+        ...options,
+        agents: {
+          Explorer: { enabled: true, allowed_tools: [42], http: { methods: [], credentials: {} } },
+        },
+      })),
+    )
+    expect(Exit.isFailure(exit)).toBeTrue()
+  })
+
   test("reads the configured TypeSafe environment variable", async () => {
     const key = await Effect.runPromise(
       resolveApiKey(
@@ -301,8 +440,8 @@ describe("configuration", () => {
     })
     expect(decoded.cache).toEqual({ capacity: 32, ttlMs: 60_000 })
     expect(agentPolicy(decoded.agents, "Explorer").enabled).toBeTrue()
-    expect(decoded.allowProbability).toBe(0.45)
-    expect(decoded.violationProbability).toBe(0.4)
+    expect(decoded.allowProbability).toBe(0.35)
+    expect(decoded.violationProbability).toBe(0.5)
     expect(decoded.maxAttempts).toBe(2)
   })
 
@@ -418,12 +557,47 @@ describe("Jev request", () => {
     )
   })
 
+  test("resolves home-relative external directory rules against the home directory", () => {
+    const event: PermissionEvent & { readonly agent: string } = {
+      sessionID: "session",
+      agent: "Explorer",
+      action: "shell",
+      resources: ["git status --short"],
+      effect: "allow",
+    }
+    const request = buildRequest({
+      event,
+      model: options.model,
+      policy: agentPolicy(options.agents, "Explorer"),
+      agentDefinition: {
+        encoded: agentDefinition.encoded,
+        externalDirectoryRules: [
+          { resource: "*", effect: "deny" },
+          { resource: "~/.local/share/opencode", effect: "allow" },
+          { resource: "~/.local/share/opencode/**", effect: "allow" },
+          { resource: "/tmp/**", effect: "allow" },
+        ],
+      },
+      projectDirectory: "/home/dev/project",
+      homeDirectory: "/isolated/home",
+      command: "git status --short",
+    })
+
+    expect(request.state.filesystemAccess.homeDirectory).toBe("/isolated/home")
+    expect(request.state.filesystemAccess.externalDirectoryRules).toEqual([
+      { resource: "*", effect: "deny" },
+      { resource: "/isolated/home/.local/share/opencode", effect: "allow" },
+      { resource: "/isolated/home/.local/share/opencode/**", effect: "allow" },
+      { resource: "/tmp/**", effect: "allow" },
+    ])
+  })
+
   test("allows only high policy confidence with low violation probabilities", () => {
     expect(permissionFromAssessment(assessment(0.45, 0.39, 0.39, 0.39), options)).toBe("allow")
-    expect(permissionFromAssessment(assessment(0.44, 0.01, 0.01, 0.01), options)).toBe("deny")
-    expect(permissionFromAssessment(assessment(0.99, 0.4, 0.01, 0.01), options)).toBe("deny")
-    expect(permissionFromAssessment(assessment(0.99, 0.01, 0.4, 0.01), options)).toBe("deny")
-    expect(permissionFromAssessment(assessment(0.99, 0.01, 0.01, 0.4), options)).toBe("deny")
+    expect(permissionFromAssessment(assessment(0.44, 0.01, 0.01, 0.01), options)).toBe("allow")
+    expect(permissionFromAssessment(assessment(0.99, 0.4, 0.01, 0.01), options)).toBe("allow")
+    expect(permissionFromAssessment(assessment(0.99, 0.01, 0.4, 0.01), options)).toBe("allow")
+    expect(permissionFromAssessment(assessment(0.99, 0.01, 0.01, 0.4), options)).toBe("allow")
     expect(permissionFromAssessment(assessment(0.1, 0.9, 0.9, 0.9), options)).toBe("deny")
   })
 
@@ -643,12 +817,12 @@ describe("source command capture", () => {
 })
 
 describe("permission hook", () => {
-  test("preserves commands allowed by configured shell rules without calling Jev", async () => {
+  test("classifies a natively allowed simple command", async () => {
     let requests = 0
     const evaluate = await Effect.runPromise(
       evaluator(async () => {
         requests += 1
-        throw new Error("should not be called")
+        return effectResponse(assessment(0.98, 0.01, 0.01, 0.01))
       }),
     )
     const event: PermissionEvent = {
@@ -661,8 +835,8 @@ describe("permission hook", () => {
 
     await Effect.runPromise(evaluate(event))
 
+    expect(requests).toBe(1)
     expect(event.effect).toBe("allow")
-    expect(requests).toBe(0)
   })
 
   test("classifies an allowed command when shell expansion can change its effects", async () => {
@@ -737,7 +911,7 @@ describe("permission hook", () => {
     const genericOptions: Options = {
       ...options,
       agents: {
-        Researcher: { enabled: true, http: { methods: [], credentials: {} } },
+        Researcher: { enabled: true, allowed_tools: [], http: { methods: [], credentials: {} } },
       },
     }
     let resolvedAgent = ""
@@ -771,7 +945,7 @@ describe("permission hook", () => {
     const disabledOptions: Options = {
       ...options,
       agents: {
-        Researcher: { enabled: false, http: { methods: [], credentials: {} } },
+        Researcher: { enabled: false, allowed_tools: [], http: { methods: [], credentials: {} } },
       },
     }
     const evaluate = await Effect.runPromise(
@@ -825,6 +999,91 @@ describe("permission hook", () => {
     await Effect.runPromise(evaluate(event))
 
     expect(event.effect).toBe("allow")
+  })
+
+  test("forwards the Librarian's symbolic Orangesharing authentication policy to the classifier", async () => {
+    const command =
+      "curl -s -H \"Authorization: $OS_TK\" https://orangesharing.com/plugins/viewsource/viewpagesrc.action?pageId=789 -o /tmp/opencode-librarian/review/page.html -w \"HTTP_STATUS:%{http_code}\\n\""
+    const capturedRequestSchema = Schema.Struct({
+      state: Schema.Struct({
+        command: Schema.String,
+        policy: Schema.Struct({
+          http: Schema.Struct({
+            methods: Schema.Array(Schema.String),
+            credentials: Schema.Record(
+              Schema.String,
+              Schema.Union([
+                Schema.Array(Schema.String),
+                Schema.Struct({
+                  hosts: Schema.Array(Schema.String),
+                  scheme: Schema.Literal("https"),
+                  header: Schema.String,
+                  disclosure: Schema.Literal("deny"),
+                }),
+              ]),
+            ),
+          }),
+        }),
+      }),
+    })
+    let requestBody = ""
+    const evaluate = await Effect.runPromise(
+      evaluator(async (_input, init) => {
+        requestBody = typeof init?.body === "string" ? init.body : ""
+        return effectResponse(assessment(0.98, 0.01, 0.01, 0.01))
+      }),
+    )
+    const event = librarianEvent(command)
+
+    await Effect.runPromise(evaluate(event))
+
+    const payload = await Effect.runPromise(
+      Schema.decodeUnknownEffect(Schema.fromJsonString(capturedRequestSchema))(requestBody),
+    )
+    expect(payload.state.command).toBe(command)
+    expect(payload.state.command).toContain("$OS_TK")
+    expect(payload.state.policy.http.methods).toEqual(["GET", "HEAD"])
+    expect(payload.state.policy.http.credentials["OS_TK"]).toEqual({
+      hosts: ["orangesharing.com"],
+      scheme: "https",
+      header: "Authorization",
+      disclosure: "deny",
+    })
+    expect(payload.state.policy.http.credentials["BRAVE_SEARCH_API_KEY"]).toEqual(["api.search.brave.com"])
+    expect(event.effect).toBe("allow")
+  })
+
+  test("forwards the configured allowed_tools to the classifier", async () => {
+    const capturedRequestSchema = Schema.Struct({
+      state: Schema.Struct({
+        command: Schema.String,
+        policy: Schema.Struct({
+          allowed_tools: Schema.Array(Schema.String),
+        }),
+      }),
+    })
+    let requestBody = ""
+    const evaluate = await Effect.runPromise(
+      evaluator(async (_input, init) => {
+        requestBody = typeof init?.body === "string" ? init.body : ""
+        return effectResponse(assessment(0.98, 0.01, 0.01, 0.01))
+      }),
+    )
+    const event: PermissionEvent = {
+      sessionID: "session",
+      agent: "Explorer",
+      action: "shell",
+      resources: ["cellar get-external org.typelevel::cats-effect:3.7.0"],
+      effect: "allow",
+    }
+
+    await Effect.runPromise(evaluate(event))
+
+    const payload = await Effect.runPromise(
+      Schema.decodeUnknownEffect(Schema.fromJsonString(capturedRequestSchema))(requestBody),
+    )
+    expect(payload.state.command).toBe("cellar get-external org.typelevel::cats-effect:3.7.0")
+    expect(payload.state.policy.allowed_tools).toEqual(["cellar"])
   })
 
   test("denies a command Jev rejects by default", async () => {
@@ -985,7 +1244,7 @@ describe("fallback action", () => {
   const askFallbackOptions: Options = {
     ...options,
     agents: {
-      Researcher: { enabled: true, fallback: "ask", http: { methods: [], credentials: {} } },
+      Researcher: { enabled: true, fallback: "ask", allowed_tools: [], http: { methods: [], credentials: {} } },
     },
   }
 
