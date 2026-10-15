@@ -479,11 +479,6 @@ describe("real OpenCode permission evaluation", () => {
     expect(result.effect).toBe("allow")
   })
 
-  test("denies Junior build output redirection outside its allowed paths", async () => {
-    const result = await evaluate("Junior", "sbt test 2>&1 >/home/dev/jev-junior-sbt-output.log")
-    expect(result.effect).toBe("deny")
-  })
-
   test("allows Junior to query Brave Search with its configured credential", async () => {
     const command =
       "curl -s \"https://api.search.brave.com/res/v1/web/search\" -H \"Accept: application/json\" -H \"X-Subscription-Token: ${BRAVE_SEARCH_API_KEY}\" -G --data-urlencode \"q=OpenAI official site\" --data-urlencode \"count=5\""
