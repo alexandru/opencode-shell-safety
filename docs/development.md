@@ -11,7 +11,7 @@ bun ci
 ## Tests
 
 `make test` runs the typecheck, unit tests, and integration tests. The integration
-tests call SystemOne and need `OPENCODE_API_KEY` in your environment. To run
+tests call TypeSafe SystemOne and need `TYPESAFE_API_KEY` in your environment. To run
 checks without an API key:
 
 ```sh
@@ -21,7 +21,7 @@ bun run test
 
 ## GitHub Actions
 
-Add `OPENCODE_API_KEY` as a repository secret under **Settings > Secrets and
+Add `TYPESAFE_API_KEY` as a repository secret under **Settings > Secrets and
 variables > Actions**. The [test workflow](../.github/workflows/test.yml) runs
 the typecheck and unit tests on pull requests, and all tests on pushes to this
 repository's `main` branch.

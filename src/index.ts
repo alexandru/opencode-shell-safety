@@ -396,7 +396,7 @@ const isRetryable = (error: JevRequestError): boolean => {
 
 const environmentApiKey = (name: string) =>
   Effect.gen(function*() {
-    const apiKey = yield* Config.redacted(name)
+    const apiKey = yield* Config.schema(Schema.Redacted(Schema.String), name)
     return Redacted.value(apiKey)
   }).pipe(Effect.catch(() => Effect.succeed(undefined)))
 

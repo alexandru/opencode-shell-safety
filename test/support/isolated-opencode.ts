@@ -29,10 +29,9 @@ const fixtureNames = ["Analyst.md", "Explorer.md", "Librarian.md", "Junior.md", 
 const password = "shell-safety-e2e"
 
 const options = {
-  endpoint: "https://opencode.ai/zen/v1/systemone",
-  model: "jev-1.13",
-  integration: "opencode",
-  apiKeyEnv: "OPENCODE_API_KEY",
+  endpoint: "https://api.typesafe.ai/v1/systemone",
+  model: "jev-1.13.0",
+  apiKeyEnv: "TYPESAFE_API_KEY",
   allowProbability: 0.35,
   violationProbability: 0.5,
   timeoutMs: 15000,

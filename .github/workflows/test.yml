@@ -25,5 +25,5 @@ jobs:
       - name: Integration tests
         if: github.event_name == 'push' && github.repository == 'alexandru/opencode-shell-safety'
         env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: bun run test:e2e
