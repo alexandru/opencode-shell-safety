@@ -25,7 +25,7 @@ const PluginResponse = Schema.Struct({
 
 const repository = fileURLToPath(new URL("../..", import.meta.url))
 const fixtures = fileURLToPath(new URL("../fixtures/agents", import.meta.url))
-const fixtureNames = ["Analyst.md", "Explorer.md", "Librarian.md", "Junior.md", "Solo.md"]
+const fixtureNames = ["Explorer.md", "Librarian.md", "Junior.md", "Solo.md"]
 const password = "shell-safety-e2e"
 
 const options = {
@@ -39,10 +39,6 @@ const options = {
   retryDelayMs: 250,
   cache: { capacity: 256, ttlMs: 300000 },
   agents: {
-    Analyst: {
-      enabled: true,
-      thresholds: { allowProbability: 0.35, violationProbability: 0.55 },
-    },
     Explorer: {
       enabled: true,
       allowed_tools: ["cellar"],
@@ -127,7 +123,6 @@ const opencodeConfig = () => {
       general: { disabled: true },
       explore: { disabled: true },
       scout: { disabled: true },
-      Analyst: { model: "opencode-go/deepseek-v4.1-flash#low" },
       Junior: { model: "opencode-go/deepseek-v4.1-flash#max" },
       Explorer: { model: "opencode-go/deepseek-v4.1-flash#low" },
       Librarian: { model: "opencode-go/deepseek-v4.1-flash#low" },

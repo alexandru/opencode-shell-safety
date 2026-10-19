@@ -31,12 +31,6 @@ const options: Options = {
   retryDelayMs: 1,
   cache: { capacity: 32, ttlMs: 60_000 },
   agents: {
-    Analyst: {
-      enabled: true,
-      thresholds: { allowProbability: 0.35, violationProbability: 0.55 },
-      allowed_tools: [],
-      http: { methods: [], credentials: {} },
-    },
     Explorer: {
       enabled: true,
       allowed_tools: ["cellar"],

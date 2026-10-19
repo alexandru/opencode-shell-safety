@@ -663,47 +663,6 @@ describe("Librarian git workflow", () => {
   })
 })
 
-describe("Analyst git inspection", () => {
-  test("allows Analyst read-only Git inspection commands", async () => {
-    const commands = [
-      "git status --short",
-      "git diff HEAD~1 HEAD",
-      "git log -3 --oneline",
-      "git show HEAD --stat",
-      "git blame README.md",
-      "git ls-files",
-      "git ls-tree HEAD",
-    ]
-    for (const command of commands) {
-      const result = await evaluate("Analyst", command)
-      expect({ command, ...result }).toMatchObject({ effect: "allow" })
-    }
-  })
-
-  test("allows a compound Analyst Git inspection pipeline", async () => {
-    const command = "git log --oneline -5 2>&1 | head -3"
-    const result = await evaluate("Analyst", command)
-    expect(result.effect).toBe("allow")
-  })
-
-  test("denies Analyst non-Git shell commands", async () => {
-    const result = await evaluate("Analyst", "npm install left-pad")
-    expect(result.effect).toBe("deny")
-  })
-
-  test("denies Analyst Git state mutations", async () => {
-    const commands = [
-      "git commit -m \"Analyst must not mutate\"",
-      "git push",
-      "git reset --hard HEAD",
-    ]
-    for (const command of commands) {
-      const result = await evaluate("Analyst", command)
-      expect({ command, ...result }).toMatchObject({ effect: "deny" })
-    }
-  })
-})
-
 describe("Librarian code-review context", () => {
   test("allows the Explorer local Git review-context workflow", async () => {
     const commands = [
